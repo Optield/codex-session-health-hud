@@ -13,6 +13,13 @@ try {
     )) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $stage $name) -Force
     }
+
+    $sourceAssets = Join-Path $PSScriptRoot 'assets'
+    if (-not (Test-Path -LiteralPath $sourceAssets -PathType Container)) {
+        throw 'Package assets directory was not found.'
+    }
+    Copy-Item -LiteralPath $sourceAssets -Destination (Join-Path $stage 'assets') -Recurse -Force
+
     $zip = Join-Path $OutputDir 'CodexSessionHealthHUD-win-x64.zip'
     Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
     Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
