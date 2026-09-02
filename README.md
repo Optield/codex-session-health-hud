@@ -12,9 +12,9 @@ It is a lightweight Windows companion for Codex Desktop centered on one practica
 
 Instead of opening a separate monitoring window, the HUD is inserted cleanly into the Codex composer toolbar, immediately to the **left of the native context ring**:
 
-```text
-[ Weekly usage ] [ Post-compaction risk ] [ Native Codex context ring ]
-```
+<p align="center">
+  <img src="assets/hud-composer.svg" alt="Codex composer toolbar with weekly usage, post-compaction risk, and the native context ring" width="310">
+</p>
 
 The native ring is left untouched. The HUD adds only the information Codex does not currently surface together: post-compaction pressure, compaction count, cumulative session tokens, and both account quota windows.
 
@@ -162,15 +162,18 @@ Program binaries, scripts, documentation, and the icon are static install files;
 - Microsoft Store Codex Desktop (`OpenAI.Codex` package)
 - Windows .NET Framework compiler for source builds; `Build.ps1` uses the framework compiler included with standard Windows installations
 
-### Install from source
+### Easy install (recommended)
 
-Open PowerShell in the repository directory:
+For normal Windows use, prefer the prebuilt package produced by the Windows CI build:
 
-```powershell
-.\Install.ps1
-```
+1. Open the [latest CI runs](https://github.com/Optield/codex-session-health-hud/actions/workflows/ci.yml) and choose a successful `main` run.
+2. Download the `CodexSessionHealthHUD-win-x64` artifact.
+3. Extract the downloaded ZIP.
+4. Double-click `Install-Easy.bat`.
 
-The installer builds and installs the HUD to:
+`Install-Easy.bat` installs only the files already present in that ZIP. It does **not** download code, use PowerShell `-EncodedCommand`, disable Microsoft Defender, or add antivirus exclusions.
+
+The installer places the HUD in:
 
 ```text
 %LOCALAPPDATA%\CodexSessionHealthHUD\
@@ -181,6 +184,16 @@ and creates a Start menu shortcut named:
 ```text
 Codex with Session Health HUD
 ```
+
+### Install from source
+
+If you want to build from source, open PowerShell in the repository directory:
+
+```powershell
+.\Install.ps1
+```
+
+The source installer uses the same install directory and Start menu shortcut as the prebuilt package.
 
 ### Important: launch Codex through the HUD shortcut
 
