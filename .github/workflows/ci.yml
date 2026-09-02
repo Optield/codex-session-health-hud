@@ -9,21 +9,38 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Check renderer syntax
         shell: pwsh
         run: node --check .\RendererHudScript.js
+
       - name: Test renderer logic
         shell: pwsh
         run: node .\tests\renderer-logic.test.js
+
       - name: Build and run self-tests
         shell: pwsh
         run: .\Build.ps1
+
       - name: Create Windows package
         shell: pwsh
         run: .\Package.ps1 -OutputDir .\dist
+
+      - name: Test Windows package
+        shell: pwsh
+        run: .\tests\package-layout.test.ps1 -PackagePath .\dist\CodexSessionHealthHUD-win-x64.zip
+
+      - name: Stage easy-download artifact
+        shell: pwsh
+        run: |
+          $artifactDir = '.\dist\artifact'
+          Remove-Item -LiteralPath $artifactDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+          Expand-Archive -LiteralPath '.\dist\CodexSessionHealthHUD-win-x64.zip' -DestinationPath $artifactDir -Force
+
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
           name: CodexSessionHealthHUD-win-x64
-          path: .\dist\CodexSessionHealthHUD-win-x64.zip
+          path: .\dist\artifact\*
           if-no-files-found: error
