@@ -474,9 +474,6 @@
     runtime.postStatus = 'measuring';
     runtime.postTokens = -1;
     runtime.postWindow = -1;
-    // Codex locally re-estimates active context immediately after compaction.
-    // Do not surface that potentially inaccurate estimate as "Current context";
-    // wait for the next measured token-usage update instead.
     runtime.currentContextTokens = -1;
     runtime.currentContextPercent = -1;
     runtime.captureRunId = runId;
@@ -886,40 +883,51 @@
           <div data-r-post style="margin-top:2px;font-variant-numeric:tabular-nums">—</div>
           <div data-r-message style="margin-top:3px;opacity:.78"></div>
         </div>
-        <div style="height:1px;background:color-mix(in srgb, CanvasText 10%, transparent)"></div>
-        <div style="display:flex;justify-content:space-between;gap:18px"><span style="opacity:.72">Current context</span><span data-r-current style="font-variant-numeric:tabular-nums">—</span></div>
-        <div style="display:flex;justify-content:space-between;gap:18px"><span style="opacity:.72">Compactions</span><span data-r-count style="font-variant-numeric:tabular-nums">—</span></div>
-        <div style="display:flex;justify-content:space-between;gap:18px"><span style="opacity:.72">Session tokens</span><span data-r-total style="font-variant-numeric:tabular-nums">—</span></div>
+        <div style="height:1px;background:currentColor;opacity:.10"></div>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:5px 18px">
+          <span style="opacity:.72">Current context</span><span data-r-current style="font-variant-numeric:tabular-nums">—</span>
+          <span style="opacity:.72">Compactions</span><span data-r-count style="font-variant-numeric:tabular-nums">—</span>
+          <span style="opacity:.72">Session tokens</span><span data-r-total style="font-variant-numeric:tabular-nums">—</span>
+        </div>
       </div>`;
     return riskTooltip;
   }
 
   function updateUsageTooltip() {
     const tooltip = ensureUsageTooltip();
-    const windows = codexQuotaWindows();
-    const fiveHour = remainingPercent(windows.fiveHour);
-    const weekly = remainingPercent(windows.weekly);
-    tooltip.querySelector('[data-u-5h]').textContent = fiveHour === null ? '—' : `${Math.round(fiveHour)}% remaining`;
-    tooltip.querySelector('[data-u-week]').textContent = weekly === null ? '—' : `${Math.round(weekly)}% remaining`;
+    const { fiveHour, weekly } = codexQuotaWindows();
+    const five = remainingPercent(fiveHour);
+    const week = remainingPercent(weekly);
+    tooltip.querySelector('[data-u-5h]').textContent = five === null ? '—' : `${Math.round(five)}% remaining`;
+    tooltip.querySelector('[data-u-week]').textContent = week === null ? '—' : `${Math.round(week)}% remaining`;
   }
 
   function updateRiskTooltip() {
     const tooltip = ensureRiskTooltip();
     const runtime = threadRuntime(activeThreadId);
     const risk = effectiveRisk(runtime);
-    let postText = '—';
-    if (risk.status === 'measuring') postText = 'Measuring…';
-    else if (risk.status === 'syncing') postText = 'Checking…';
-    else if ((risk.status === 'ready' || risk.status === 'staleWindow') && runtime) {
-      postText = `${formatTokens(runtime.postTokens)} / ${formatTokens(runtime.postWindow)}   ${formatPercent(risk.percent)}`;
+    const post = tooltip.querySelector('[data-r-post]');
+    const message = tooltip.querySelector('[data-r-message]');
+    const current = tooltip.querySelector('[data-r-current]');
+    const count = tooltip.querySelector('[data-r-count]');
+    const total = tooltip.querySelector('[data-r-total]');
+    if (risk.status === 'ready' || risk.status === 'staleWindow') {
+      post.textContent = `${formatTokens(runtime.postTokens)} / ${formatTokens(runtime.postWindow)}   ${formatPercent(risk.percent)}`;
+    } else if (risk.status === 'measuring') {
+      post.textContent = 'Measuring…';
+    } else if (risk.status === 'syncing') {
+      post.textContent = 'Checking…';
+    } else {
+      post.textContent = '—';
     }
-    tooltip.querySelector('[data-r-post]').textContent = postText;
-    tooltip.querySelector('[data-r-message]').textContent = risk.message;
-    const currentPercent = runtime ? ratioPercent(runtime.currentContextTokens, runtime.currentContextWindow) : null;
-    tooltip.querySelector('[data-r-current]').textContent = runtime && runtime.currentContextTokens >= 0 && runtime.currentContextWindow > 0 ?
-      `${formatTokens(runtime.currentContextTokens)} / ${formatTokens(runtime.currentContextWindow)}   ${formatPercent(currentPercent)}` : '—';
-    tooltip.querySelector('[data-r-count]').textContent = runtime && runtime.compactionCount >= 0 ? String(runtime.compactionCount) : '…';
-    tooltip.querySelector('[data-r-total]').textContent = runtime && runtime.sessionTotalTokens >= 0 ? formatTokens(runtime.sessionTotalTokens) : '—';
+    message.textContent = risk.message;
+    if (runtime && runtime.currentContextTokens >= 0 && runtime.currentContextWindow > 0) {
+      current.textContent = `${formatTokens(runtime.currentContextTokens)} / ${formatTokens(runtime.currentContextWindow)}   ${formatPercent(runtime.currentContextPercent)}`;
+    } else {
+      current.textContent = '—';
+    }
+    count.textContent = runtime && Number.isInteger(runtime.compactionCount) && runtime.compactionCount >= 0 ? String(runtime.compactionCount) : '…';
+    total.textContent = runtime && runtime.sessionTotalTokens >= 0 ? formatTokens(runtime.sessionTotalTokens) : '—';
   }
 
   function positionTooltip(tooltip, anchor) {
@@ -927,7 +935,7 @@
     const rect = anchor.getBoundingClientRect();
     const width = tooltip.offsetWidth;
     const height = tooltip.offsetHeight;
-    const left = Math.max(8, Math.min(innerWidth - width - 8, rect.left - 6));
+    const left = Math.max(8, Math.min(innerWidth - width - 8, rect.left + rect.width / 2 - width / 2));
     const above = rect.top - height - 9;
     const top = above >= 8 ? above : Math.min(innerHeight - height - 8, rect.bottom + 9);
     tooltip.style.left = `${Math.round(left)}px`;
@@ -936,7 +944,6 @@
 
   function showTooltipSoon(kind, anchor) {
     if (tooltipTimer) window.clearTimeout(tooltipTimer);
-    tooltipKind = kind;
     tooltipTimer = window.setTimeout(() => {
       tooltipTimer = 0;
       showTooltipNow(kind, anchor);
@@ -960,60 +967,79 @@
     if (riskTooltip) riskTooltip.style.display = 'none';
   }
 
-  function findToolbar() {
+  function findComposerFooter() {
     if (toolbar && toolbar.isConnected && visible(toolbar)) return toolbar;
     const editor = currentComposer();
     if (!editor) return null;
     let footer = editor;
-    while (footer && footer !== document.body && !String(footer.className).includes('ComposerLayoutFooter')) footer = footer.parentElement;
-    if (!footer || footer === document.body) return null;
-    const flexes = Array.from(footer.querySelectorAll('div')).filter(element => {
-      const style = getComputedStyle(element);
-      return style.display === 'flex' && visible(element) && element.querySelectorAll('button').length >= 2;
-    });
-    flexes.sort((a, b) => {
-      const ar = a.getBoundingClientRect();
-      const br = b.getBoundingClientRect();
-      return ar.width * ar.height - br.width * br.height;
-    });
-    toolbar = flexes[0] || null;
+    while (footer && footer !== document.body && !String(footer.className).includes('ComposerLayoutFooter')) {
+      footer = footer.parentElement;
+    }
+    toolbar = footer && footer !== document.body ? footer : null;
     return toolbar;
   }
 
+  function isContextAriaLabel(label) {
+    return /context|컨텍스트|上下文/i.test(label || '');
+  }
+
   function findNativeContext(container) {
-    if (nativeContext && nativeContext.isConnected) return nativeContext;
-    nativeContext = Array.from(container.querySelectorAll('[role="img"][aria-label]'))
-      .find(element => /context|上下文/i.test(element.getAttribute('aria-label') || '')) || null;
+    if (nativeContext && nativeContext.isConnected && isContextAriaLabel(nativeContext.getAttribute('aria-label'))) {
+      return nativeContext;
+    }
+    const scope = container || document;
+    nativeContext = Array.from(scope.querySelectorAll('[role="img"][aria-label]'))
+      .find(element => visible(element) && isContextAriaLabel(element.getAttribute('aria-label'))) || null;
     return nativeContext;
+  }
+
+  function directChildUnder(ancestor, element) {
+    if (!ancestor || !element || !ancestor.contains(element)) return null;
+    let current = element;
+    while (current && current.parentElement !== ancestor) current = current.parentElement;
+    return current && current.parentElement === ancestor ? current : null;
   }
 
   function mount() {
     if (disposed || document.hidden) return;
     refreshActiveThread();
-    const container = findToolbar();
-    if (!container) {
+
+    const footer = findComposerFooter();
+    if (!footer) {
       if (host) host.remove();
       host = null;
       ui = null;
       return;
     }
-    const contextElement = findNativeContext(container);
-    const modelButton = Array.from(container.querySelectorAll('button[aria-haspopup="menu"]'))
-      .find(button => button.hasAttribute('data-codex-intelligence-trigger')) ||
-      Array.from(container.querySelectorAll('button[aria-haspopup="menu"]')).find(visible);
+
+    const contextElement = findNativeContext(footer);
     let anchorSlot = contextElement && contextElement.parentElement;
     let anchorGroup = anchorSlot && anchorSlot.parentElement;
-    if (!anchorSlot || !anchorGroup) {
-      anchorGroup = modelButton && modelButton.parentElement;
-      while (anchorGroup && anchorGroup !== container && !(anchorGroup.tagName === 'DIV' && getComputedStyle(anchorGroup).display === 'flex')) anchorGroup = anchorGroup.parentElement;
-      anchorSlot = modelButton;
-      while (anchorSlot && anchorGroup && anchorSlot.parentElement !== anchorGroup) anchorSlot = anchorSlot.parentElement;
+
+    if (anchorSlot && anchorGroup && !footer.contains(anchorGroup)) {
+      anchorSlot = null;
+      anchorGroup = null;
     }
+
+    if (!anchorSlot || !anchorGroup) {
+      const modelButton = Array.from(footer.querySelectorAll('button[aria-haspopup="menu"]'))
+        .find(button => button.hasAttribute('data-codex-intelligence-trigger')) ||
+        Array.from(footer.querySelectorAll('button[aria-haspopup="menu"]')).filter(visible).at(-1);
+      if (modelButton) {
+        anchorGroup = modelButton.parentElement;
+        while (anchorGroup && anchorGroup !== footer && getComputedStyle(anchorGroup).display !== 'flex') {
+          anchorGroup = anchorGroup.parentElement;
+        }
+        if (anchorGroup) anchorSlot = directChildUnder(anchorGroup, modelButton);
+      }
+    }
+
     if (!anchorSlot || !anchorGroup) return;
     if (host && host.isConnected && host.parentElement === anchorGroup && host.nextElementSibling === anchorSlot) {
       renderActive();
       return;
     }
+
     if (host) host.remove();
     const created = createHost();
     host = created.element;
@@ -1044,56 +1070,48 @@
     if (usageTooltip && usageTooltip.style.display !== 'none' && ui) positionTooltip(usageTooltip, ui.usageStat);
     if (riskTooltip && riskTooltip.style.display !== 'none' && ui) positionTooltip(riskTooltip, ui.riskStat);
   };
+  window.addEventListener('message', onMessage, true);
+  window.addEventListener('resize', onViewport, true);
+  window.addEventListener('scroll', onViewport, true);
+  const observer = new MutationObserver(() => {
+    if (disposed || document.hidden) return;
+    if (!host || !host.isConnected || !toolbar || !toolbar.isConnected || !nativeContext || !nativeContext.isConnected) scheduleMount(80);
+    scheduleActiveThreadRefresh(100);
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
   const onVisibility = () => {
     if (!document.hidden) {
-      cachedComposer = null;
       scheduleMount(0);
+      scheduleActiveThreadRefresh(0);
     }
   };
-
-  let observer = null;
-  if (!TEST_MODE) {
-    window.addEventListener('message', onMessage, true);
-    window.addEventListener('resize', onViewport, true);
-    window.addEventListener('scroll', onViewport, true);
-    document.addEventListener('visibilitychange', onVisibility, true);
-    observer = new MutationObserver(() => scheduleMount());
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-  }
+  document.addEventListener('visibilitychange', onVisibility, true);
 
   const dispose = () => {
     disposed = true;
-    for (const runtime of runtimeThreads.values()) {
-      runtime.syncGeneration += 1;
-      runtime.syncInFlight = false;
-    }
-    if (observer) observer.disconnect();
-    if (!TEST_MODE) {
-      window.removeEventListener('message', onMessage, true);
-      window.removeEventListener('resize', onViewport, true);
-      window.removeEventListener('scroll', onViewport, true);
-      document.removeEventListener('visibilitychange', onVisibility, true);
-    }
+    observer.disconnect();
+    document.removeEventListener('visibilitychange', onVisibility, true);
+    window.removeEventListener('message', onMessage, true);
+    window.removeEventListener('resize', onViewport, true);
+    window.removeEventListener('scroll', onViewport, true);
     if (mountTimer) window.clearTimeout(mountTimer);
     if (activeThreadTimer) window.clearTimeout(activeThreadTimer);
     if (quotaRequestTimer) window.clearTimeout(quotaRequestTimer);
     if (tooltipTimer) window.clearTimeout(tooltipTimer);
-    hideTooltips(false);
-    if (usageTooltip) usageTooltip.remove();
-    if (riskTooltip) riskTooltip.remove();
-    usageTooltip = null;
-    riskTooltip = null;
+    mountTimer = activeThreadTimer = quotaRequestTimer = tooltipTimer = 0;
     if (host) host.remove();
     host = null;
     ui = null;
+    if (usageTooltip) usageTooltip.remove();
+    if (riskTooltip) riskTooltip.remove();
+    usageTooltip = riskTooltip = null;
     if (window[INSTANCE] && window[INSTANCE].dispose === dispose) delete window[INSTANCE];
   };
 
   window[INSTANCE] = {
     version: 1,
-    product: PRODUCT_NAME,
-    dispose,
     remount: () => scheduleMount(0),
+    dispose,
     snapshot: () => ({
       activeThreadId,
       runId,
@@ -1110,6 +1128,7 @@
       remainingPercent,
       effectiveRisk,
       isApproximateWindow,
+      isContextAriaLabel,
       clearRateLimits: () => rateLimitsById.clear()
     } : undefined
   };
