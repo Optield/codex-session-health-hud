@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 
 global.window = global;
+window.addEventListener = () => {};
+window.removeEventListener = () => {};
 window.__codexSessionHealthHudTestMode = true;
 window.__codexSessionHealthHudBootstrap = { runId: 'test-run', threads: {} };
 global.document = {
