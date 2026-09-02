@@ -18,3 +18,12 @@ jobs:
       - name: Build and run self-tests
         shell: pwsh
         run: .\Build.ps1
+      - name: Create Windows package
+        shell: pwsh
+        run: .\Package.ps1 -OutputDir .\dist
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodexSessionHealthHUD-win-x64
+          path: .\dist\CodexSessionHealthHUD-win-x64.zip
+          if-no-files-found: error
