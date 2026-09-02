@@ -3,6 +3,7 @@
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows&logoColor=white)](#requirements)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
 [![Korean README](https://img.shields.io/badge/README-한국어-4c8bf5)](README.ko.md)
+[![Latest release](https://img.shields.io/github/v/release/Optield/codex-session-health-hud?label=release)](https://github.com/Optield/codex-session-health-hud/releases/latest)
 
 Long-running Codex sessions accumulate active context. As the working set grows and repeated compactions retain more of it, a thread can become progressively less efficient to continue and may eventually benefit from a clean session boundary. **Codex Session Health HUD** was built to make that transition easier to judge from observable context behavior instead of elapsed time, task count, or intuition.
 
@@ -164,12 +165,15 @@ Program binaries, scripts, documentation, and the icon are static install files;
 
 ### Easy install (recommended)
 
-For normal Windows use, prefer the prebuilt package produced by the Windows CI build:
+For normal Windows use, install from the latest GitHub Release:
 
-1. Open the [latest CI runs](https://github.com/Optield/codex-session-health-hud/actions/workflows/ci.yml) and choose a successful `main` run.
-2. Download the `CodexSessionHealthHUD-win-x64` artifact.
+1. Open the [Latest Release](https://github.com/Optield/codex-session-health-hud/releases/latest).
+2. Under **Assets**, download `CodexSessionHealthHUD-win-x64.zip`.
 3. Extract the downloaded ZIP.
 4. Double-click `Install-Easy.bat`.
+
+> [!NOTE]
+> Download **`CodexSessionHealthHUD-win-x64.zip` from Assets**. GitHub also shows automatically generated `Source code (zip)` / `Source code (tar.gz)` links; those are source archives, not the ready-to-install Windows package.
 
 `Install-Easy.bat` installs only the files already present in that ZIP. It does **not** download code, use PowerShell `-EncodedCommand`, disable Microsoft Defender, or add antivirus exclusions.
 
