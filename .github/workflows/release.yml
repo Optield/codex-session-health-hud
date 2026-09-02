@@ -4,7 +4,8 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:
+    paths:
+      - .github/workflows/release.yml
 
 permissions:
   contents: write
@@ -15,48 +16,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check whether v0.1.1 already exists
-        id: release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view v0.1.1 --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -eq 0) {
-            'exists=true' >> $env:GITHUB_OUTPUT
-            Write-Host 'v0.1.1 already exists; nothing to publish.'
-          } else {
-            'exists=false' >> $env:GITHUB_OUTPUT
-            Write-Host 'v0.1.1 does not exist yet; building release package.'
-          }
-
       - name: Check renderer syntax
-        if: steps.release.outputs.exists != 'true'
         shell: pwsh
         run: node --check .\RendererHudScript.js
 
       - name: Test renderer logic
-        if: steps.release.outputs.exists != 'true'
         shell: pwsh
         run: node .\tests\renderer-logic.test.js
 
       - name: Build and run self-tests
-        if: steps.release.outputs.exists != 'true'
         shell: pwsh
         run: .\Build.ps1
 
       - name: Create Windows package
-        if: steps.release.outputs.exists != 'true'
         shell: pwsh
         run: .\Package.ps1 -OutputDir .\dist
 
       - name: Test Windows package
-        if: steps.release.outputs.exists != 'true'
         shell: pwsh
         run: .\tests\package-layout.test.ps1 -PackagePath .\dist\CodexSessionHealthHUD-win-x64.zip
 
       - name: Publish v0.1.1
-        if: steps.release.outputs.exists != 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
