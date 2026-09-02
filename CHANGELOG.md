@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1 - 2026-09-03
+
+- Fix Start menu launch failures caused by resolving the install directory from `$PSScriptRoot` inside a parameter default; the launcher now resolves its own path at runtime and the shortcut passes `-InstallDir` explicitly.
+- Surface launcher startup exceptions in a Windows message box instead of silently closing the PowerShell window.
+- Mount the HUD against the native Codex context ring instead of guessing the smallest composer flex group.
+- Recognize localized native context-ring labels, including Korean `컨텍스트`, with regression coverage.
+- Add a local-only `Install-Easy.bat` and a prebuilt Windows CI artifact for non-developer installation; the easy installer does not download code or use `-EncodedCommand`.
+- Add package-layout regression checks for the launcher path fix, safe easy-installer invariants, required files, and README assets.
+- Include README assets in source installs and prebuilt packages.
+- Replace the textual toolbar mockup in both READMEs with a screenshot of the actual composer integration.
+
 ## 0.1.0 - 2026-09-03
 
 - Initial Codex Session Health HUD implementation.
