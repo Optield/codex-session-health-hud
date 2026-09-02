@@ -1,0 +1,20 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check renderer syntax
+        shell: pwsh
+        run: node --check .\RendererHudScript.js
+      - name: Test renderer logic
+        shell: pwsh
+        run: node .\tests\renderer-logic.test.js
+      - name: Build and run self-tests
+        shell: pwsh
+        run: .\Build.ps1
