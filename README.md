@@ -4,11 +4,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
 [![Korean README](https://img.shields.io/badge/README-한국어-4c8bf5)](README.ko.md)
 
-**Codex Session Health HUD** is a lightweight Windows companion for Codex Desktop that turns the information around long-running sessions into a small, native-looking status surface inside the Codex composer.
+Long-running Codex sessions accumulate active context. As the working set grows and repeated compactions retain more of it, a thread can become progressively less efficient to continue and may eventually benefit from a clean session boundary. **Codex Session Health HUD** was built to make that transition easier to judge from observable context behavior instead of elapsed time, task count, or intuition.
 
-It answers one practical question especially well:
+It is a lightweight Windows companion for Codex Desktop centered on one practical decision:
 
-> **After the last compaction, how much context was still occupied — and how much room did the session actually recover?**
+> **Is this session still healthy enough to keep using, or is post-compaction pressure high enough that starting a fresh session is worth considering?**
 
 Instead of opening a separate monitoring window, the HUD is inserted cleanly into the Codex composer toolbar, immediately to the **left of the native context ring**:
 
@@ -19,6 +19,39 @@ Instead of opening a separate monitoring window, the HUD is inserted cleanly int
 The native ring is left untouched. The HUD adds only the information Codex does not currently surface together: post-compaction pressure, compaction count, cumulative session tokens, and both account quota windows.
 
 ## What it shows
+
+### Post-compaction risk bar
+
+The three vertical bars represent the **residual context pressure immediately after the most recent compaction that the HUD successfully measured**.
+
+| Post-compaction context | Display | Guidance |
+| --- | --- | --- |
+| No compaction | Gray | `No compaction yet.` |
+| Measuring | Gray | `Waiting for measured context usage.` |
+| Not captured / unavailable | Gray | No risk is guessed |
+| `<45%` | Green | `This session is in good shape.` |
+| `45–65%` | Yellow | `You can keep using this session.` |
+| `65–80%` | Red | `Consider starting a new session soon.` |
+| `>=80%` | Purple | `Starting a new session is recommended.` |
+
+Hovering the risk indicator shows the session data used to interpret that signal:
+
+```text
+Post-compaction context
+103K / 258K   39.9%
+This session is in good shape.
+
+Current context
+187K / 258K   72.4%
+
+Compactions
+3
+
+Session tokens
+12.84M
+```
+
+The risk bar is intentionally based on **post-compaction context**, not current context. If a compaction leaves the session at 39.9% and the current context later grows to 85%, the bar remains tied to the 39.9% compaction result until another compaction occurs. This makes it a measure of how much context pressure survived the last compaction rather than a second copy of the native context ring.
 
 ### Weekly usage bar
 
@@ -36,52 +69,21 @@ Weekly
 
 The HUD identifies 5-hour and weekly windows from the durations reported by Codex, using the same approximate-window approach used in current Codex code. Rate-limit snapshots are isolated by `limitId`, so unrelated limits such as model-specific reserve windows cannot overwrite the main Codex allowance.
 
-### Post-compaction risk bar
-
-The three vertical bars do **not** represent the number of compactions. They represent the context pressure measured after the most recent compaction that the HUD successfully observed.
-
-| Post-compaction context | Display | Guidance |
-| --- | --- | --- |
-| No compaction | Gray | `No compaction yet.` |
-| Measuring | Gray | `Waiting for measured context usage.` |
-| Not captured / unavailable | Gray | No risk is guessed |
-| `<45%` | Green | `This session is in good shape.` |
-| `45–65%` | Yellow | `You can keep using this session.` |
-| `65–80%` | Red | `Consider starting a new session soon.` |
-| `>=80%` | Purple | `Starting a new session is recommended.` |
-
-Hovering the risk indicator shows the full session snapshot:
-
-```text
-Post-compaction context
-103K / 258K   39.9%
-This session is in good shape.
-
-Current context
-187K / 258K   72.4%
-
-Compactions
-3
-
-Session tokens
-12.84M
-```
-
-The risk bar is intentionally based on **post-compaction context**, not current context. If a compaction leaves the session at 39.9% and the current context later grows to 85%, the bar remains tied to the 39.9% compaction result until another compaction occurs. This makes the indicator a measure of how much pressure survived compaction rather than a second copy of the native context ring.
-
 ## Why 65%?
 
-The 65% boundary is an **evidence-informed operational threshold**, not an official OpenAI policy.
+The 65% boundary is an **evidence-informed operational threshold**, not an official OpenAI session policy. It is derived from the amount of usable runway that remains after compaction under current Codex context-budgeting defaults.
 
-It was chosen because multiple public signals converge on roughly the same point:
+Codex currently exposes an effective model context window that is approximately 95% of the model's raw window, while automatic compaction is normally triggered near 90% of the raw window. Expressed against the effective window reported to the client, that default compaction region is roughly **94.7%**.
 
-- A recent Codex adaptive-context proposal uses post-compaction bands of **below 45%**, **45–65%**, and **65% or above** when deciding whether a thread needs more context budget: [openai/codex#41538](https://github.com/openai/codex/issues/41538).
-- A separate Codex App bug report specifically identifies **more than 65% context remaining immediately after compaction** as a problematic outcome because it leaves too little recovered capacity for meaningful continuation: [openai/codex#40856](https://github.com/openai/codex/issues/40856).
-- Operationally, once roughly two-thirds of the effective window is still occupied immediately after compaction, the compaction has recovered relatively little working headroom. That is a useful point to change the visual signal even though the exact quality of a session still depends on the task.
+That makes post-compaction occupancy directly useful as a headroom signal:
 
-For that reason, 65% is used as the transition into the red tier. The purple `>=80%` tier is an additional local critical band for cases where compaction retained an unusually large fraction of the window.
+- At **45%**, roughly **49.7 percentage points** of the effective window remain before the default compaction region — close to half a fresh working window.
+- At **65%**, that runway falls to roughly **29.7 percentage points**. A compaction intended to reclaim working space has left almost two thirds of the effective window occupied, so the next compaction cycle is materially closer.
+- At **80%**, only about **14.7 percentage points** remain, which is why the HUD treats this as a separate critical tier.
 
-These colors are guidance, not a scientific score. **Compaction count and cumulative session tokens are shown separately and do not affect the risk color.**
+The 65% transition is therefore not based on session age or an arbitrary token count. It marks the point where a successful compaction has restored **less than about one third of effective-window runway** before Codex approaches its next default compaction region. For long-running work, that is a useful operational boundary between “continue normally” and “start considering a clean session boundary.”
+
+Custom context-window or auto-compaction settings can shift the exact runway, so the colors remain guidance rather than a quality guarantee. **Compaction count and cumulative session tokens are shown separately and do not affect the risk color.**
 
 ## Measurement model
 
@@ -140,17 +142,6 @@ The HUD persists only **one mutable runtime data file**:
 It stores bounded metadata only: thread IDs, compaction IDs/counts, post-compaction token/window snapshots, and capture status. A typical thread entry is only a few hundred bytes. Even around **1,000 tracked sessions**, the state file should normally remain in the **low hundreds of kilobytes**, not hundreds of megabytes. The implementation also hard-limits the state store to 10,000 thread entries and 4 MiB.
 
 Program binaries, scripts, documentation, and the icon are static install files; `state.json` is the only mutable session-state file maintained by the HUD.
-
-## Additional session information
-
-The risk hover card includes a few signals that are useful when judging long-running Codex work without turning the HUD into a full analytics dashboard:
-
-- exact compaction count for the current thread;
-- cumulative session token usage;
-- current active context and effective context window;
-- post-compaction context snapshot and ratio.
-
-The usage bar remains visually focused on the weekly limit, while hover exposes both the **5-hour** and **weekly** account windows.
 
 ## Installation and everyday use
 
