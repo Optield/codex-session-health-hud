@@ -81,7 +81,7 @@ if (-not $NoStartMenu) {
     $powershell = (Get-Process -Id $PID).Path
     $shortcut = $shell.CreateShortcut($launcherShortcut)
     $shortcut.TargetPath = $powershell
-    $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$targetLauncher`" -Port $Port"
+    $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$targetLauncher`" -InstallDir `"$InstallDir`" -Port $Port"
     $shortcut.WorkingDirectory = $InstallDir
     if (Test-Path -LiteralPath $targetIcon) { $shortcut.IconLocation = "$targetIcon,0" }
     $shortcut.Description = 'Start Codex with the Session Health HUD'
