@@ -12,9 +12,9 @@ Codex에서 같은 세션을 오래 사용할수록 active context가 누적되�
 
 HUD는 Codex의 composer toolbar에 삽입되며 **기존 native context ring 바로 왼쪽**에 배치됩니다.
 
-```text
-[ 주간 사용량 ] [ Post-compaction 위험도 ] [ Codex native context ring ]
-```
+<p align="center">
+  <img src="assets/hud-composer.svg" alt="주간 Usage, Post-compaction Risk, Codex native context ring이 함께 표시된 composer toolbar" width="310">
+</p>
 
 Native context ring은 수정하지 않습니다. 대신 Codex가 한 화면에서 제공하지 않는 post-compaction pressure, 컴팩션 횟수, 세션 누적 토큰, 5시간/주간 quota를 작고 정돈된 형태로 추가합니다.
 
@@ -166,13 +166,16 @@ HUD가 지속적으로 변경하며 저장하는 runtime 데이터 파일은 **�
 - Microsoft Store 버전 Codex Desktop (`OpenAI.Codex` package)
 - 소스 빌드 시 Windows .NET Framework compiler; `Build.ps1`는 일반적인 Windows 설치에 포함된 framework compiler를 사용합니다
 
-### 소스에서 설치
+### 쉬운 설치 (권장)
 
-저장소 폴더에서 PowerShell을 열고 실행합니다.
+일반적인 Windows 사용자는 Windows CI에서 미리 빌드한 package를 사용하는 것이 가장 간단합니다.
 
-```powershell
-.\Install.ps1
-```
+1. [최신 CI 실행 목록](https://github.com/Optield/codex-session-health-hud/actions/workflows/ci.yml)에서 `main`의 성공한 실행을 엽니다.
+2. `CodexSessionHealthHUD-win-x64` artifact를 다운로드합니다.
+3. 다운로드한 ZIP의 압축을 풉니다.
+4. `Install-Easy.bat`을 더블클릭합니다.
+
+`Install-Easy.bat`은 ZIP 안에 이미 들어 있는 로컬 파일만 설치합니다. 인터넷에서 코드를 추가 다운로드하지 않으며, PowerShell `-EncodedCommand`를 사용하거나 Microsoft Defender를 끄거나 백신 예외를 추가하지 않습니다.
 
 기본 설치 경로:
 
@@ -185,6 +188,16 @@ HUD가 지속적으로 변경하며 저장하는 runtime 데이터 파일은 **�
 ```text
 Codex with Session Health HUD
 ```
+
+### 소스에서 설치
+
+직접 소스 빌드를 하려면 저장소 폴더에서 PowerShell을 열고 실행합니다.
+
+```powershell
+.\Install.ps1
+```
+
+소스 설치도 위와 동일한 설치 경로와 시작 메뉴 바로가기를 사용합니다.
 
 ### 중요: 일반 Codex가 아니라 HUD 바로가기로 실행해야 합니다
 
