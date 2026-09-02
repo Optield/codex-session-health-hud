@@ -99,4 +99,9 @@ assert.equal(t.isApproximateWindow(284, 300), false);
 assert.equal(t.isApproximateWindow(9576, 10080), true);
 assert.equal(t.isApproximateWindow(10584, 10080), true);
 
+assert.equal(t.isContextAriaLabel('Context usage: 92%'), true);
+assert.equal(t.isContextAriaLabel('컨텍스트 사용량: 92%'), true);
+assert.equal(t.isContextAriaLabel('上下文使用量：92%'), true);
+assert.equal(t.isContextAriaLabel('Usage limits'), false);
+
 console.log('renderer logic: ok');
