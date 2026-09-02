@@ -158,71 +158,51 @@ HUD가 지속적으로 변경하며 저장하는 runtime 데이터 파일은 **�
 
 실행 파일, launcher, 문서, 아이콘 등은 설치 시 한 번 배치되는 static 파일이며, 세션 상태 때문에 계속 증가하는 mutable 파일은 `state.json` 하나뿐입니다.
 
-## 설치 및 사용 방법
+## 설치 방법
 
 ### 요구 환경
 
 - Windows 10 또는 Windows 11 x64
-- Microsoft Store 버전 Codex Desktop (`OpenAI.Codex` package)
-- 소스 빌드 시 Windows .NET Framework compiler; `Build.ps1`는 일반적인 Windows 설치에 포함된 framework compiler를 사용합니다
+- Microsoft Store Codex Desktop (`OpenAI.Codex` package)
+- 소스 빌드 시 Windows .NET Framework compiler 필요. `Build.ps1`은 일반 Windows에 포함된 framework compiler를 사용합니다.
 
 ### 쉬운 설치 (권장)
 
-일반적인 Windows 사용자는 Windows CI에서 미리 빌드한 package를 사용하는 것이 가장 간단합니다.
+일반 사용자는 Windows CI에서 미리 빌드된 패키지를 사용하는 방법을 권장합니다.
 
-1. [최신 CI 실행 목록](https://github.com/Optield/codex-session-health-hud/actions/workflows/ci.yml)에서 `main`의 성공한 실행을 엽니다.
+1. [최신 CI 실행 목록](https://github.com/Optield/codex-session-health-hud/actions/workflows/ci.yml)을 열고 성공한 `main` 실행을 선택합니다.
 2. `CodexSessionHealthHUD-win-x64` artifact를 다운로드합니다.
 3. 다운로드한 ZIP의 압축을 풉니다.
-4. `Install-Easy.bat`을 더블클릭합니다.
+4. 압축을 푼 폴더에서 `Install-Easy.bat`을 더블클릭합니다.
 
-`Install-Easy.bat`은 ZIP 안에 이미 들어 있는 로컬 파일만 설치합니다. 인터넷에서 코드를 추가 다운로드하지 않으며, PowerShell `-EncodedCommand`를 사용하거나 Microsoft Defender를 끄거나 백신 예외를 추가하지 않습니다.
+`Install-Easy.bat`은 ZIP 안에 이미 들어 있는 로컬 파일만 설치합니다. 코드 다운로드, PowerShell `-EncodedCommand`, Microsoft Defender 비활성화, 백신 예외 추가를 하지 않습니다.
 
-기본 설치 경로:
+HUD는 다음 위치에 설치됩니다.
 
 ```text
 %LOCALAPPDATA%\CodexSessionHealthHUD\
 ```
 
-설치 후 시작 메뉴에 다음 바로가기가 생성됩니다.
+그리고 시작 메뉴에 다음 바로가기가 생성됩니다.
 
 ```text
 Codex with Session Health HUD
 ```
 
+> [!TIP]
+> **설치가 정상적으로 완료된 뒤에는 다운로드한 ZIP 파일과 압축을 풀어 만든 폴더 및 그 안의 파일을 전부 삭제해도 됩니다.** 그 파일들은 설치할 때만 필요합니다. 실제 사용되는 프로그램은 이미 `%LOCALAPPDATA%\CodexSessionHealthHUD\`에 복사되어 설치되어 있고, 시작 메뉴 바로가기도 이 설치본을 사용합니다.
+
 ### 소스에서 설치
 
-직접 소스 빌드를 하려면 저장소 폴더에서 PowerShell을 열고 실행합니다.
+직접 소스에서 빌드하려면 저장소 폴더에서 PowerShell을 열고 다음을 실행합니다.
 
 ```powershell
 .\Install.ps1
 ```
 
-소스 설치도 위와 동일한 설치 경로와 시작 메뉴 바로가기를 사용합니다.
+소스 설치도 동일한 설치 폴더와 시작 메뉴 바로가기를 사용합니다.
 
-### 중요: 일반 Codex가 아니라 HUD 바로가기로 실행해야 합니다
-
-Composer 내부에 HUD를 붙이려면 Codex가 시작될 때 loopback-only Chromium DevTools port가 활성화되어 있어야 합니다.
-
-따라서 HUD를 사용할 때는 기본 Codex 바로가기가 아니라:
-
-```text
-Codex with Session Health HUD
-```
-
-를 실행해야 합니다.
-
-Launcher는 Microsoft Store에 설치된 공식 Codex package를 Windows package activation API로 실행하면서 다음 두 인자만 전달합니다.
-
-```text
---remote-debugging-address=127.0.0.1
---remote-debugging-port=9231
-```
-
-포트가 준비되면 HUD가 로컬에서 연결됩니다. Codex 설치 파일을 수정하거나 교체하지 않습니다.
-
-이미 기본 Codex 바로가기로 앱이 실행 중이라면 그 프로세스에는 나중에 debug port를 추가할 수 없습니다. 작업을 저장하고 Codex를 종료한 뒤 **Codex with Session Health HUD**로 다시 실행하면 됩니다. Launcher가 사용자 대신 Codex를 강제로 종료하거나 재시작하지는 않습니다.
-
-다른 로컬 포트를 사용하려면:
+다른 loopback port를 사용하려면:
 
 ```powershell
 .\Install.ps1 -Port 9331
@@ -234,21 +214,46 @@ Launcher는 Microsoft Store에 설치된 공식 Codex package를 Windows package
 .\Build.ps1
 ```
 
-실행 파일을 교체하기 전에 state-store와 renderer regression self-test가 실행됩니다.
+빌드는 기존 `CodexSessionHealthHUD.exe`를 교체하기 전에 state-store와 renderer regression self-test를 실행합니다.
 
 ### 삭제
+
+다음을 실행합니다.
 
 ```powershell
 & "$env:LOCALAPPDATA\CodexSessionHealthHUD\Uninstall.ps1"
 ```
 
-Uninstaller는 install marker를 검증한 뒤 관련 shortcut을 제거하고 다음 폴더 자체를 삭제합니다.
+Uninstaller는 설치 marker를 확인한 뒤 HUD 바로가기와 다음 설치 폴더 전체를 삭제합니다.
 
 ```text
 %LOCALAPPDATA%\CodexSessionHealthHUD\
 ```
 
-따라서 `state.json`을 포함한 HUD 파일이 모두 제거됩니다. Codex conversation, rollout, 설정, credential에는 손대지 않습니다.
+`state.json`도 함께 삭제됩니다. Codex 대화, rollout 데이터, 설정, 인증 정보는 건드리지 않습니다.
+
+## 사용 방법
+
+> [!IMPORTANT]
+> **HUD를 사용하려면 매번 일반 `Codex`가 아니라 Windows 시작 메뉴의 `Codex with Session Health HUD`로 실행해야 합니다.**
+>
+> ❌ `Codex` — Codex는 실행되지만 HUD가 나타나지 않습니다.  
+> ✅ `Codex with Session Health HUD` — HUD가 붙는 데 필요한 로컬 DevTools port와 함께 Codex를 실행합니다.
+>
+> 일반 Codex가 이미 실행 중이라면 작업을 저장한 뒤 Codex를 완전히 종료하고 **`Codex with Session Health HUD`**로 다시 실행하세요. 이미 실행 중인 Codex 프로세스에는 나중에 HUD용 debugging port를 추가할 수 없습니다.
+
+HUD를 계속 사용할 생각이라면 **`Codex with Session Health HUD`를 평소 사용하는 Codex 실행 아이콘이라고 생각하면 됩니다.**
+
+이 바로가기는 별도의 Codex를 설치하거나 다른 복사본을 실행하는 것이 아닙니다. 공식 Microsoft Store Codex package를 실행하면서 다음 로컬 옵션만 추가합니다.
+
+```text
+--remote-debugging-address=127.0.0.1
+--remote-debugging-port=9231
+```
+
+포트가 준비되면 HUD가 로컬로 연결됩니다. Codex 설치 파일을 패치하거나 교체하지 않습니다.
+
+Codex가 열리면 평소처럼 사용하면 됩니다. HUD는 composer toolbar의 기존 native context ring 바로 왼쪽에 표시됩니다.
 
 ## 최신 Codex와의 호환성
 
