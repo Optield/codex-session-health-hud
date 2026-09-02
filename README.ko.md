@@ -3,6 +3,7 @@
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows&logoColor=white)](#요구-환경)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
 [![English README](https://img.shields.io/badge/README-English-4c8bf5)](README.md)
+[![Latest release](https://img.shields.io/github/v/release/Optield/codex-session-health-hud?label=release)](https://github.com/Optield/codex-session-health-hud/releases/latest)
 
 Codex에서 같은 세션을 오래 사용할수록 active context가 누적되고, 반복되는 컴팩션 뒤에도 큰 working set이 남기 시작하면 세션을 계속 유지하는 효율과 안정성이 점차 떨어질 수 있습니다. **Codex Session Health HUD**는 단순히 세션이 얼마나 오래됐는지가 아니라 실제 컨텍스트 상태를 바탕으로, **현재 세션을 계속 사용할지 새 세션으로 넘어갈지를 판단하는 데 도움을 주기 위해** 만들었습니다.
 
@@ -146,17 +147,15 @@ Host 프로세스는 대부분의 시간 동안 로컬 DevTools WebSocket 이벤
 
 ### 추가로 생성되는 데이터 파일
 
-HUD가 지속적으로 변경하며 저장하는 runtime 데이터 파일은 **단 하나**입니다.
+HUD가 유지하는 mutable runtime data file은 **하나뿐입니다.**
 
 ```text
 %LOCALAPPDATA%\CodexSessionHealthHUD\state.json
 ```
 
-여기에는 thread ID, compaction ID/횟수, post-compaction token/window snapshot, capture 상태처럼 작은 메타데이터만 저장됩니다.
+여기에는 thread ID, compaction ID/횟수, post-compaction token/window snapshot, capture status 같은 제한된 메타데이터만 저장합니다. 일반적인 thread entry 하나는 수백 byte 정도이며, 약 **1,000개 세션을 추적하더라도 보통 수백 KB 초반 수준**에 머뭅니다. 구현상 state store 자체도 10,000개 thread entry와 4 MiB로 제한됩니다.
 
-세션 하나의 레코드는 보통 수백 바이트 수준입니다. 따라서 **1,000개 정도의 세션을 추적해도 일반적으로 수백 KB 이하의 작은 파일**에 머무르는 규모입니다. 구현 자체에서도 10,000 thread entry와 4 MiB의 hard limit을 두고 있습니다.
-
-실행 파일, launcher, 문서, 아이콘 등은 설치 시 한 번 배치되는 static 파일이며, 세션 상태 때문에 계속 증가하는 mutable 파일은 `state.json` 하나뿐입니다.
+실행 파일, script, 문서, icon은 설치 시 복사되는 정적 파일이며 세션 상태에 따라 계속 늘어나는 데이터가 아닙니다.
 
 ## 설치 방법
 
@@ -168,12 +167,15 @@ HUD가 지속적으로 변경하며 저장하는 runtime 데이터 파일은 **�
 
 ### 쉬운 설치 (권장)
 
-일반 사용자는 Windows CI에서 미리 빌드된 패키지를 사용하는 방법을 권장합니다.
+일반 사용자는 최신 GitHub Release에서 설치하는 방법을 권장합니다.
 
-1. [최신 CI 실행 목록](https://github.com/Optield/codex-session-health-hud/actions/workflows/ci.yml)을 열고 성공한 `main` 실행을 선택합니다.
-2. `CodexSessionHealthHUD-win-x64` artifact를 다운로드합니다.
+1. [Latest Release](https://github.com/Optield/codex-session-health-hud/releases/latest)를 엽니다.
+2. **Assets**에서 `CodexSessionHealthHUD-win-x64.zip`을 다운로드합니다.
 3. 다운로드한 ZIP의 압축을 풉니다.
 4. 압축을 푼 폴더에서 `Install-Easy.bat`을 더블클릭합니다.
+
+> [!NOTE]
+> 반드시 **Assets의 `CodexSessionHealthHUD-win-x64.zip`**을 받으세요. GitHub가 자동으로 표시하는 `Source code (zip)` / `Source code (tar.gz)`는 소스 코드 묶음이며, 바로 설치하는 Windows 패키지가 아닙니다.
 
 `Install-Easy.bat`은 ZIP 안에 이미 들어 있는 로컬 파일만 설치합니다. 코드 다운로드, PowerShell `-EncodedCommand`, Microsoft Defender 비활성화, 백신 예외 추가를 하지 않습니다.
 
@@ -257,53 +259,55 @@ Codex가 열리면 평소처럼 사용하면 됩니다. HUD는 composer toolbar�
 
 ## 최신 Codex와의 호환성
 
-Codex Desktop은 공개 `openai/codex` main보다 약간 앞서거나 뒤질 수 있습니다. 그래서 특정 Codex 버전 번호에 의존하기보다 **runtime feature detection**을 우선합니다.
+Codex Desktop은 공개 `openai/codex` 저장소보다 조금 앞서거나 뒤선 빌드를 사용할 수 있습니다. 그래서 특정 Codex 버전 번호를 하드코딩하기보다 **runtime feature detection**을 우선합니다.
 
-- 현재 `contextCompaction` item lifecycle을 우선 사용하고 deprecated `thread/compacted`는 호환 fallback으로만 처리
-- 최신 camelCase token/rate-limit field를 우선 사용하고 필요한 경우 legacy snake_case 지원
-- 지원되는 환경에서는 공식 `thread/items/list` pagination으로 compaction history reconciliation 수행
-- 오래된 client에서는 이미 로딩된 native history를 fallback으로 사용
+현재 API를 먼저 사용하고 필요한 범위에서만 구형 fallback을 유지합니다.
 
-이벤트 parser도 임의의 Codex payload를 재귀적으로 전부 탐색하지 않고, 필요한 method만 allow-list 방식으로 제한적으로 처리합니다.
+- `contextCompaction` item lifecycle 우선, deprecated `thread/compacted`는 fallback만 사용
+- 최신 camelCase token/rate-limit field 우선, 필요한 경우 legacy snake_case parsing
+- 지원되는 client에서는 공식 `thread/items/list` pagination으로 compaction history 동기화
+- 구형 client에서는 native loaded history fallback
 
-## Privacy / Security
+이벤트 parser도 임의 payload를 무제한 순회하지 않고 method allow-list와 depth/node 제한을 사용합니다.
 
-영구 저장되는 정보는 작은 운영 메타데이터뿐입니다. HUD는 다음 정보를 저장하지 않습니다.
+## 개인정보와 보안
 
-- 사용자 prompt
-- assistant 답변
+Persistent HUD state에는 운영에 필요한 제한된 메타데이터만 저장합니다. 다음 정보는 저장하지 않습니다.
+
+- prompt text
+- assistant reply
 - tool output
-- 파일 내용
-- workspace 경로
+- file contents
+- workspace path
 - credential / auth token
 - account identity
 
-HUD 자체가 외부 네트워크 요청을 만들지 않으며 DevTools endpoint는 명시적으로 `127.0.0.1`에만 bind합니다.
+HUD 자체가 외부 네트워크 요청을 추가로 보내지 않으며 DevTools endpoint는 명시적으로 `127.0.0.1`에만 bind합니다.
 
-## 기반 프로젝트와 구현 방향
+## 프로젝트 계보
 
-Codex Session Health HUD는 다음 두 MIT 프로젝트의 아이디어와 구현에서 많은 도움을 받았습니다.
+이 프로젝트는 다음 두 MIT license Windows 프로젝트에서 상당한 아이디어와 구현 영감을 받았습니다.
 
-- [`wtf12345789/codex-context-hud`](https://github.com/wtf12345789/codex-context-hud) — Windows packaged-app launcher, local DevTools attach, composer-integrated HUD 구조
-- [`LH-03/codex-monitor-hud`](https://github.com/LH-03/codex-monitor-hud) — context/quota monitoring 아이디어, session 누적 token과 운영 정보를 노출하는 방식
+- [`wtf12345789/codex-context-hud`](https://github.com/wtf12345789/codex-context-hud) — packaged app launcher, local DevTools attach, composer-integrated HUD 개념
+- [`LH-03/codex-monitor-hud`](https://github.com/LH-03/codex-monitor-hud) — context/quota monitoring 아이디어와 cumulative token/session 정보 표시
 
-다만 두 프로젝트의 코드를 단순히 합친 것은 아닙니다. 구현 과정에서 최신 `openai/codex`를 다시 기준으로 삼아 여러 가정을 교정했습니다. Deprecated compaction notification은 fallback으로 내렸고, active context 계산은 `last.totalTokens` 기준으로 정렬했으며, sparse rate-limit update를 올바르게 merge하도록 변경했습니다. 또한 상시 JSONL/SQLite monitoring을 제거하고 event parser, DOM observer, renderer, CDP receive path를 더 좁게 만들어 resident resource cost와 유지보수 표면을 줄였습니다.
+Codex Session Health HUD는 두 저장소를 단순 병합한 결과가 아닙니다. 구현 과정에서 현재 `openai/codex`를 기준으로 관련 가정을 다시 검증했습니다. deprecated compaction notification은 fallback으로 이동했고, active context는 `last.totalTokens`에 맞췄으며, sparse rate-limit notification merge를 반영했습니다. 또한 resident path에서 JSONL/SQLite monitoring을 제거하고 renderer/CDP 구조를 좁혀 polling, parsing, DOM 작업량을 줄였습니다.
 
-자세한 attribution과 license notice는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하세요.
+상세 attribution과 license notice는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하세요.
 
-## 구현 원칙
+## 구현상 지키는 규칙
 
-이 프로젝트는 몇 가지 규칙을 architecture invariant로 유지합니다.
+다음 사항은 architecture invariant로 취급합니다.
 
-- CDP WebSocket의 incoming message reader는 하나만 유지
-- Renderer → Host persistence는 작은 payload만 허용하는 고정 one-way binding 사용
-- 이벤트 parser는 method allow-list와 depth/node bound 적용
-- 현재 보이는 thread와 무관하게 thread별 runtime state 유지
+- CDP WebSocket의 incoming message는 하나의 reader만 소비
+- renderer → host persistence는 고정된 one-way binding과 작은 payload만 사용
+- event parser는 method allow-list와 depth/node 제한 사용
+- 현재 화면에 보이는 thread와 별개로 thread별 state 유지
 - `state.json`은 named mutex 아래에서 atomic write
-- Codex session/rollout 원본 파일은 읽거나 수정하지 않음
+- Codex session/rollout file은 수정하지 않음
 
-## 라이선스
+## License
 
 MIT License. [LICENSE](LICENSE)를 참고하세요.
 
-Codex Session Health HUD는 독립적인 community project이며 **OpenAI의 공식 제품이 아닙니다.**
+Codex Session Health HUD는 독립적인 community project이며 **OpenAI 공식 제품이 아닙니다.**
