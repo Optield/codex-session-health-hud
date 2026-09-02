@@ -18,9 +18,7 @@ Instead of opening a separate monitoring window, the HUD is inserted cleanly int
 
 The native ring is left untouched. The HUD adds only the information Codex does not currently surface together: post-compaction pressure, compaction count, cumulative session tokens, and both account quota windows.
 
-## What it shows
-
-### Post-compaction risk bar
+## Post-compaction risk
 
 The three vertical bars represent the **residual context pressure immediately after the most recent compaction that the HUD successfully measured**.
 
@@ -53,25 +51,9 @@ Session tokens
 
 The risk bar is intentionally based on **post-compaction context**, not current context. If a compaction leaves the session at 39.9% and the current context later grows to 85%, the bar remains tied to the 39.9% compaction result until another compaction occurs. This makes it a measure of how much context pressure survived the last compaction rather than a second copy of the native context ring.
 
-### Weekly usage bar
-
-The horizontal usage bar is based on **weekly quota remaining**. Hovering it expands the account view to show both locally reported Codex quota windows:
-
-```text
-Usage limits
-
-5-hour
-63% remaining
-
-Weekly
-78% remaining
-```
-
-The HUD identifies 5-hour and weekly windows from the durations reported by Codex, using the same approximate-window approach used in current Codex code. Rate-limit snapshots are isolated by `limitId`, so unrelated limits such as model-specific reserve windows cannot overwrite the main Codex allowance.
-
 ## Why 65%?
 
-The 65% boundary is an **evidence-informed operational threshold**, not an official OpenAI session policy. It is derived from the amount of usable runway that remains after compaction under current Codex context-budgeting defaults.
+The 65% boundary is an **evidence-informed operational threshold**, not an official OpenAI session policy. It combines two related signals: how much runway remains before the next normal compaction region, and how much of the context window is already occupied by information that survived the previous compaction.
 
 Codex currently exposes an effective model context window that is approximately 95% of the model's raw window, while automatic compaction is normally triggered near 90% of the raw window. Expressed against the effective window reported to the client, that default compaction region is roughly **94.7%**.
 
@@ -81,7 +63,11 @@ That makes post-compaction occupancy directly useful as a headroom signal:
 - At **65%**, that runway falls to roughly **29.7 percentage points**. A compaction intended to reclaim working space has left almost two thirds of the effective window occupied, so the next compaction cycle is materially closer.
 - At **80%**, only about **14.7 percentage points** remain, which is why the HUD treats this as a separate critical tier.
 
-The 65% transition is therefore not based on session age or an arbitrary token count. It marks the point where a successful compaction has restored **less than about one third of effective-window runway** before Codex approaches its next default compaction region. For long-running work, that is a useful operational boundary between “continue normally” and “start considering a clean session boundary.”
+There is a second reason this matters. Compaction is not simply deletion: it has to preserve enough instructions, decisions, code state, tool results, constraints, and summarized history for the thread to remain coherent. If the context is still heavily occupied immediately after compaction, a large fraction of the effective window is already committed before much new work begins.
+
+That leaves less room for subsequent observations and decisions before another compaction is required. As the cycle repeats, newly accumulated information has to compete with an increasingly dense retained state, and the next compaction has less freedom to discard material without losing something useful. This does not guarantee quality loss, but it raises the risk of user-visible degradation such as missed constraints, weaker recall of earlier details, repeated work, or less stable reasoning — the kind of behavior that can make a long-running session feel progressively less sharp.
+
+The 65% transition is therefore not based on session age or an arbitrary token count. It marks a point where both signals become meaningful at the same time: the previous compaction has restored **less than about one third of effective-window runway**, while almost two thirds of the usable context is already occupied by retained state. For long-running work, that is a practical boundary between “continue normally” and “start considering a clean session boundary.”
 
 Custom context-window or auto-compaction settings can shift the exact runway, so the colors remain guidance rather than a quality guarantee. **Compaction count and cumulative session tokens are shown separately and do not affect the risk color.**
 
@@ -115,6 +101,31 @@ This distinction matters. Immediately after compaction, Codex can recompute cont
 Codex's local recomputation currently produces an all-zero usage breakdown apart from `totalTokens`. The HUD rejects that shape and waits for measured activity before committing the snapshot. This is especially useful for Korean, Chinese, Japanese, emoji-heavy, or otherwise non-ASCII sessions.
 
 If the latest compaction happened while the HUD was not running, the HUD displays **Not captured** instead of reconstructing a number from private rollout files and presenting an estimate as fact.
+
+## Additional session information
+
+The risk indicator is the main signal, but its hover card also keeps a small set of supporting values available without turning the composer into a monitoring dashboard:
+
+- **Current context** — the latest active context size and effective context window reported by Codex.
+- **Compactions** — the reconciled compaction count for the current thread.
+- **Session tokens** — cumulative token usage for the thread; informative only and not part of the risk calculation.
+- **Usage limits** — account-level 5-hour and weekly quota information reported by Codex.
+
+### Weekly usage bar
+
+The horizontal usage bar is based on **weekly quota remaining** so the always-visible graphic stays stable and easy to read. Hovering it expands the account view to show both quota windows:
+
+```text
+Usage limits
+
+5-hour
+63% remaining
+
+Weekly
+78% remaining
+```
+
+The HUD identifies 5-hour and weekly windows from the durations reported by Codex, using the same approximate-window approach used in current Codex code. Rate-limit snapshots are isolated by `limitId`, so unrelated limits such as model-specific reserve windows cannot overwrite the main Codex allowance.
 
 ## Lightweight by design
 
