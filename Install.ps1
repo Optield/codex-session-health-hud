@@ -6,6 +6,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($InstallDir)) {
+    throw 'InstallDir cannot be empty.'
+}
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
+
 $sourceExe = Join-Path $PSScriptRoot 'CodexSessionHealthHUD.exe'
 if (-not (Test-Path -LiteralPath $sourceExe)) {
     & (Join-Path $PSScriptRoot 'Build.ps1')
@@ -15,6 +21,8 @@ if (-not (Test-Path -LiteralPath $sourceExe)) { throw 'Build did not produce Cod
 $targetExe = Join-Path $InstallDir 'CodexSessionHealthHUD.exe'
 $targetLauncher = Join-Path $InstallDir 'Launch-CodexWithSessionHealthHUD.ps1'
 $targetIcon = Join-Path $InstallDir 'Codex.ico'
+$sourceAssets = Join-Path $PSScriptRoot 'assets'
+$targetAssets = Join-Path $InstallDir 'assets'
 $marker = Join-Path $InstallDir '.install-marker'
 $programsDir = Join-Path ([Environment]::GetFolderPath('Programs')) 'Codex Session Health HUD'
 $launcherShortcut = Join-Path $programsDir 'Codex with Session Health HUD.lnk'
@@ -27,6 +35,9 @@ $payload = @(
 
 foreach ($name in $payload) {
     if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $name))) { throw "Missing install payload: $name" }
+}
+if (-not (Test-Path -LiteralPath $sourceAssets -PathType Container)) {
+    throw 'Missing install payload directory: assets'
 }
 
 Get-CimInstance Win32_Process -Filter "Name='CodexSessionHealthHUD.exe'" -ErrorAction SilentlyContinue |
@@ -43,15 +54,28 @@ New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 foreach ($name in $payload) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $InstallDir $name) -Force
 }
+New-Item -ItemType Directory -Path $targetAssets -Force | Out-Null
+Copy-Item -Path (Join-Path $sourceAssets '*') -Destination $targetAssets -Recurse -Force
 Set-Content -LiteralPath $marker -Value 'CodexSessionHealthHUD|v1' -Encoding ASCII
 
 if (-not $NoStartMenu) {
     $package = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |
         Sort-Object Version -Descending | Select-Object -First 1
-    $codexExe = if ($package) { Join-Path $package.InstallLocation 'app\ChatGPT.exe' } else { $null }
-    $codexIconPng = if ($package) {
-        Join-Path $package.InstallLocation 'assets\Square44x44Logo.targetsize-256_altform-unplated.png'
-    } else { $null }
+    $packageInstallLocation = if ($package -and -not [string]::IsNullOrWhiteSpace($package.InstallLocation)) {
+        $package.InstallLocation
+    } else {
+        $null
+    }
+    $codexExe = if ($packageInstallLocation) {
+        Join-Path $packageInstallLocation 'app\ChatGPT.exe'
+    } else {
+        $null
+    }
+    $codexIconPng = if ($packageInstallLocation) {
+        Join-Path $packageInstallLocation 'assets\Square44x44Logo.targetsize-256_altform-unplated.png'
+    } else {
+        $null
+    }
 
     if ($codexIconPng -and (Test-Path -LiteralPath $codexIconPng)) {
         $pngBytes = [IO.File]::ReadAllBytes($codexIconPng)
