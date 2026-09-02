@@ -154,7 +154,7 @@ It stores bounded metadata only: thread IDs, compaction IDs/counts, post-compact
 
 Program binaries, scripts, documentation, and the icon are static install files; `state.json` is the only mutable session-state file maintained by the HUD.
 
-## Installation and everyday use
+## Installation
 
 ### Requirements
 
@@ -185,6 +185,9 @@ and creates a Start menu shortcut named:
 Codex with Session Health HUD
 ```
 
+> [!TIP]
+> **After installation completes successfully, you can delete the downloaded ZIP and the entire extracted folder.** They are only installation files. The working copy has already been installed under `%LOCALAPPDATA%\CodexSessionHealthHUD\`, and the Start menu shortcut uses that installed copy.
+
 ### Install from source
 
 If you want to build from source, open PowerShell in the repository directory:
@@ -194,27 +197,6 @@ If you want to build from source, open PowerShell in the repository directory:
 ```
 
 The source installer uses the same install directory and Start menu shortcut as the prebuilt package.
-
-### Important: launch Codex through the HUD shortcut
-
-For the in-composer HUD to attach, Codex must start with a loopback-only Chromium DevTools port enabled. Therefore, when you want the HUD, launch:
-
-```text
-Codex with Session Health HUD
-```
-
-—not the native Codex shortcut.
-
-The launcher activates the official Microsoft Store package and passes only:
-
-```text
---remote-debugging-address=127.0.0.1
---remote-debugging-port=9231
-```
-
-The HUD then attaches locally after the port is ready. It does **not** patch or replace the Codex installation.
-
-If Codex is already running from its native shortcut without the debug port, save your work, exit Codex, and relaunch it through **Codex with Session Health HUD**. The launcher intentionally does not force-close or restart Codex on your behalf.
 
 To use a different loopback port:
 
@@ -245,6 +227,29 @@ The uninstaller verifies the installation marker, removes the HUD shortcuts, and
 ```
 
 directory, including `state.json`. Codex conversations, rollout data, settings, and credentials are never modified.
+
+## Usage
+
+> [!IMPORTANT]
+> **To use the HUD, always launch Codex from `Codex with Session Health HUD` in the Windows Start menu. Do not launch the normal `Codex` shortcut.**
+>
+> ❌ `Codex` — Codex starts normally, but the HUD will not appear.  
+> ✅ `Codex with Session Health HUD` — starts Codex with the local DevTools port required for the HUD to attach.
+>
+> If normal Codex is already running, save your work, close Codex completely, and then launch **`Codex with Session Health HUD`**. The required debugging port cannot be added to an already-running Codex process.
+
+If you plan to use the HUD regularly, treat **`Codex with Session Health HUD`** as your normal Codex launcher.
+
+The shortcut does **not** install or start a different copy of Codex. It activates the official Microsoft Store Codex package and passes only:
+
+```text
+--remote-debugging-address=127.0.0.1
+--remote-debugging-port=9231
+```
+
+The HUD then attaches locally after the port is ready. It does **not** patch or replace the Codex installation.
+
+Once Codex is open, use it normally. The HUD appears immediately to the left of the native context ring in the composer toolbar.
 
 ## Compatibility strategy
 
