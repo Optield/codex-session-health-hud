@@ -1,0 +1,8 @@
+CodexSessionHealthHUD.exe
+Codex.ico
+dist/
+*.tmp
+*.user
+.vs/
+bin/
+obj/
