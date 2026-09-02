@@ -1,15 +1,19 @@
 [CmdletBinding()]
 param(
-    [string]$InstallDir = $PSScriptRoot,
+    [string]$InstallDir,
     [ValidateRange(1024, 65535)]
     [int]$Port = 9231
 )
 
 $ErrorActionPreference = 'Stop'
-$hudExe = Join-Path $InstallDir 'CodexSessionHealthHUD.exe'
-if (-not (Test-Path -LiteralPath $hudExe)) {
-    throw 'CodexSessionHealthHUD.exe was not found. Reinstall the HUD.'
+
+if ([string]::IsNullOrWhiteSpace($InstallDir)) {
+    $InstallDir = [IO.Path]::GetDirectoryName($PSCommandPath)
 }
+if ([string]::IsNullOrWhiteSpace($InstallDir)) {
+    throw 'Could not resolve the Codex Session Health HUD installation directory.'
+}
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
 
 function Show-HudMessage {
     param(
@@ -27,6 +31,9 @@ function Get-CodexAppUserModelId {
     $package = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |
         Sort-Object Version -Descending | Select-Object -First 1
     if (-not $package) { throw 'Microsoft Store Codex Desktop was not found.' }
+    if ([string]::IsNullOrWhiteSpace($package.InstallLocation)) {
+        throw 'Codex Desktop is installed, but Windows did not expose its package install location.'
+    }
     $manifestPath = Join-Path $package.InstallLocation 'AppxManifest.xml'
     if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'Codex AppxManifest.xml is unavailable.' }
     [xml]$manifest = Get-Content -LiteralPath $manifestPath -Raw
@@ -79,44 +86,60 @@ function Get-DebugListener {
         -ErrorAction SilentlyContinue | Select-Object -First 1
 }
 
-$running = @(Get-CimInstance Win32_Process -Filter "Name='ChatGPT.exe'" -ErrorAction SilentlyContinue)
-$debugPattern = "(?:^|\s)--remote-debugging-port(?:=|\s+)$Port(?:\s|$)"
-if ($running | Where-Object { $_.CommandLine -match $debugPattern }) {
+try {
+    $hudExe = Join-Path $InstallDir 'CodexSessionHealthHUD.exe'
+    if (-not (Test-Path -LiteralPath $hudExe)) {
+        throw 'CodexSessionHealthHUD.exe was not found. Reinstall the HUD.'
+    }
+
+    $running = @(Get-CimInstance Win32_Process -Filter "Name='ChatGPT.exe'" -ErrorAction SilentlyContinue)
+    $debugPattern = "(?:^|\s)--remote-debugging-port(?:=|\s+)$Port(?:\s|$)"
+    if ($running | Where-Object { $_.CommandLine -match $debugPattern }) {
+        Start-Process -FilePath $hudExe -ArgumentList @('--renderer-attach', $Port) `
+            -WorkingDirectory $InstallDir -WindowStyle Hidden
+        exit 0
+    }
+
+    if ($running.Count -gt 0) {
+        Show-HudMessage -Message (
+            'Codex is already running without the local HUD debugging port.' + [Environment]::NewLine +
+            [Environment]::NewLine + 'Save your work, exit Codex, then open "Codex with Session Health HUD" again.') `
+            -Icon Warning
+        exit 3
+    }
+
+    if (Get-DebugListener -LocalPort $Port) {
+        throw "Local port $Port is already in use. Codex and the HUD were not started."
+    }
+
+    $appUserModelId = Get-CodexAppUserModelId
+    $activationArguments = @(
+        '--remote-debugging-address=127.0.0.1',
+        "--remote-debugging-port=$Port"
+    ) -join ' '
+    $codexProcessId = Start-PackagedCodex -AppUserModelId $appUserModelId -Arguments $activationArguments
+
+    $listener = $null
+    for ($attempt = 0; $attempt -lt 60 -and -not $listener; $attempt++) {
+        if (-not (Get-Process -Id $codexProcessId -ErrorAction SilentlyContinue)) { break }
+        $listener = Get-DebugListener -LocalPort $Port
+        if (-not $listener) { Start-Sleep -Milliseconds 250 }
+    }
+
+    if (-not $listener) {
+        Show-HudMessage -Message "Codex started, but the local HUD port $Port did not become ready." -Icon Warning
+        exit 4
+    }
+
     Start-Process -FilePath $hudExe -ArgumentList @('--renderer-attach', $Port) `
         -WorkingDirectory $InstallDir -WindowStyle Hidden
-    exit 0
+} catch {
+    $message = 'Codex Session Health HUD could not start.' + [Environment]::NewLine +
+        [Environment]::NewLine + $_.Exception.Message
+    try {
+        Show-HudMessage -Message $message -Icon Error
+    } catch {
+        Write-Error $message
+    }
+    exit 1
 }
-
-if ($running.Count -gt 0) {
-    Show-HudMessage -Message (
-        'Codex is already running without the local HUD debugging port.' + [Environment]::NewLine +
-        [Environment]::NewLine + 'Save your work, exit Codex, then open "Codex with Session Health HUD" again.') `
-        -Icon Warning
-    exit 3
-}
-
-if (Get-DebugListener -LocalPort $Port) {
-    throw "Local port $Port is already in use. Codex and the HUD were not started."
-}
-
-$appUserModelId = Get-CodexAppUserModelId
-$activationArguments = @(
-    '--remote-debugging-address=127.0.0.1',
-    "--remote-debugging-port=$Port"
-) -join ' '
-$codexProcessId = Start-PackagedCodex -AppUserModelId $appUserModelId -Arguments $activationArguments
-
-$listener = $null
-for ($attempt = 0; $attempt -lt 60 -and -not $listener; $attempt++) {
-    if (-not (Get-Process -Id $codexProcessId -ErrorAction SilentlyContinue)) { break }
-    $listener = Get-DebugListener -LocalPort $Port
-    if (-not $listener) { Start-Sleep -Milliseconds 250 }
-}
-
-if (-not $listener) {
-    Show-HudMessage -Message "Codex started, but the local HUD port $Port did not become ready." -Icon Warning
-    exit 4
-}
-
-Start-Process -FilePath $hudExe -ArgumentList @('--renderer-attach', $Port) `
-    -WorkingDirectory $InstallDir -WindowStyle Hidden
