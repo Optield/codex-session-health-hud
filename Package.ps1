@@ -8,7 +8,7 @@ $stage = Join-Path ([IO.Path]::GetTempPath()) ("CodexSessionHealthHUD-package-{0
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 try {
     foreach ($name in @(
-        'CodexSessionHealthHUD.exe', 'Launch-CodexWithSessionHealthHUD.ps1', 'Install.ps1', 'Uninstall.ps1',
+        'CodexSessionHealthHUD.exe', 'Install-Easy.bat', 'Launch-CodexWithSessionHealthHUD.ps1', 'Install.ps1', 'Uninstall.ps1',
         'README.md', 'README.ko.md', 'CHANGELOG.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md'
     )) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $stage $name) -Force
