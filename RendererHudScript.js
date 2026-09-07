@@ -101,6 +101,14 @@
     return Number.isFinite(value) ? `${value.toFixed(1)}%` : '—';
   }
 
+  function formatCapturedAt(value) {
+    if (typeof value !== 'string' || !value) return '';
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return '';
+    const pad = part => String(part).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
   function ratioPercent(tokens, windowSize) {
     if (!Number.isFinite(tokens) || tokens < 0 || !Number.isFinite(windowSize) || windowSize <= 0) return null;
     return clamp(tokens * 100 / windowSize);
@@ -881,6 +889,7 @@
         <div>
           <div style="font-weight:650;opacity:.72">Post-compaction context</div>
           <div data-r-post style="margin-top:2px;font-variant-numeric:tabular-nums">—</div>
+          <div data-r-captured style="display:none;margin-top:2px;opacity:.58;font-variant-numeric:tabular-nums"></div>
           <div data-r-message style="margin-top:3px;opacity:.78"></div>
         </div>
         <div style="height:1px;background:currentColor;opacity:.10"></div>
@@ -907,6 +916,7 @@
     const runtime = threadRuntime(activeThreadId);
     const risk = effectiveRisk(runtime);
     const post = tooltip.querySelector('[data-r-post]');
+    const captured = tooltip.querySelector('[data-r-captured]');
     const message = tooltip.querySelector('[data-r-message]');
     const current = tooltip.querySelector('[data-r-current]');
     const count = tooltip.querySelector('[data-r-count]');
@@ -920,6 +930,11 @@
     } else {
       post.textContent = '—';
     }
+    const capturedAt = runtime && (risk.status === 'ready' || risk.status === 'staleWindow')
+      ? formatCapturedAt(runtime.capturedAt)
+      : '';
+    captured.textContent = capturedAt ? `Captured ${capturedAt}` : '';
+    captured.style.display = capturedAt ? 'block' : 'none';
     message.textContent = risk.message;
     if (runtime && runtime.currentContextTokens >= 0 && runtime.currentContextWindow > 0) {
       current.textContent = `${formatTokens(runtime.currentContextTokens)} / ${formatTokens(runtime.currentContextWindow)}   ${formatPercent(runtime.currentContextPercent)}`;
@@ -1127,6 +1142,7 @@
       codexQuotaWindows,
       remainingPercent,
       effectiveRisk,
+      formatCapturedAt,
       isApproximateWindow,
       isContextAriaLabel,
       clearRateLimits: () => rateLimitsById.clear()

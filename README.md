@@ -38,6 +38,7 @@ Hovering the risk indicator shows the session data used to interpret that signal
 ```text
 Post-compaction context
 103K / 258K   39.9%
+Captured 2026-09-07 16:40
 This session is in good shape.
 
 Current context
@@ -49,6 +50,8 @@ Compactions
 Session tokens
 12.84M
 ```
+
+The `Captured` line uses the local system time and is refreshed whenever a new trustworthy post-compaction snapshot is accepted. If two compactions happen to produce the same percentage, the timestamp makes it easy to confirm that the value was measured again rather than left stale.
 
 The risk bar is intentionally based on **post-compaction context**, not current context. If a compaction leaves the session at 39.9% and the current context later grows to 85%, the bar remains tied to the 39.9% compaction result until another compaction occurs. This makes it a measure of how much context pressure survived the last compaction rather than a second copy of the native context ring.
 

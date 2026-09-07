@@ -38,6 +38,7 @@ Risk bar에 마우스를 올리면 위험도를 해석하는 데 필요한 세�
 ```text
 Post-compaction context
 103K / 258K   39.9%
+Captured 2026-09-07 16:40
 This session is in good shape.
 
 Current context
@@ -49,6 +50,8 @@ Compactions
 Session tokens
 12.84M
 ```
+
+`Captured` 줄은 Windows의 로컬 시간을 사용하며 신뢰할 수 있는 새 post-compaction snapshot이 확정될 때마다 갱신됩니다. 연속된 컴팩션에서 같은 퍼센트가 나오더라도 캡처 시각을 보면 이전 값이 고정된 것이 아니라 다시 측정된 값인지 바로 확인할 수 있습니다.
 
 Risk bar는 **현재 context가 아니라 마지막 post-compaction context**를 기준으로 합니다. 예를 들어 컴팩션 직후 39.9%였고 이후 current context가 85%까지 다시 증가했더라도, 다음 컴팩션이 발생하기 전까지 Risk bar는 39.9% 결과를 유지합니다.
 

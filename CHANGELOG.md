@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 - 2026-09-07
+
+- Show the local capture date and time directly under the post-compaction value in the Risk tooltip, making repeated identical percentages verifiably fresh without adding history UI or new persistent state.
+
 ## 0.1.1 - 2026-09-03
 
 - Fix Start menu launch failures caused by resolving the install directory from `$PSScriptRoot` inside a parameter default; the launcher now resolves its own path at runtime and the shortcut passes `-InstallDir` explicitly.

@@ -74,6 +74,13 @@ assert.equal(readyRisk(79.999).tier, 'red');
 assert.equal(readyRisk(80).tier, 'purple');
 assert.equal(readyRisk(40, 200).status, 'staleWindow');
 
+const capturedIso = '2026-09-07T07:40:22.000Z';
+const capturedDate = new Date(capturedIso);
+const padCaptured = value => String(value).padStart(2, '0');
+const expectedCaptured = `${capturedDate.getFullYear()}-${padCaptured(capturedDate.getMonth() + 1)}-${padCaptured(capturedDate.getDate())} ${padCaptured(capturedDate.getHours())}:${padCaptured(capturedDate.getMinutes())}`;
+assert.equal(t.formatCapturedAt(capturedIso), expectedCaptured, 'capture time is formatted in local YYYY-MM-DD HH:mm');
+assert.equal(t.formatCapturedAt('not-a-date'), '', 'invalid capture time is hidden');
+
 t.clearRateLimits();
 t.mergeRateLimitSnapshot(t.normalizeRateLimitSnapshot({
   rateLimits: {
