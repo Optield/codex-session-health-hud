@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  release-v0-1-1:
+  release-v0-1-2:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,14 +36,14 @@ jobs:
         shell: pwsh
         run: .\tests\package-layout.test.ps1 -PackagePath .\dist\CodexSessionHealthHUD-win-x64.zip
 
-      - name: Publish v0.1.1
+      - name: Publish v0.1.2
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v0.1.1 `
+          gh release create v0.1.2 `
             .\dist\CodexSessionHealthHUD-win-x64.zip `
             --repo $env:GITHUB_REPOSITORY `
             --target $env:GITHUB_SHA `
-            --title 'Codex Session Health HUD v0.1.1' `
-            --notes-file .\.github\release-notes\v0.1.1.md
+            --title 'Codex Session Health HUD v0.1.2' `
+            --notes-file .\.github\release-notes\v0.1.2.md
