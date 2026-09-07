@@ -32,14 +32,12 @@ jobs:
               text = text.replace(old, new, 1)
               p.write_text(text, encoding='utf-8')
 
-          # Renderer: local capture timestamp formatter.
           replace_once(
               'RendererHudScript.js',
               "  function formatPercent(value) {\n    return Number.isFinite(value) ? `${value.toFixed(1)}%` : '—';\n  }\n\n",
               "  function formatPercent(value) {\n    return Number.isFinite(value) ? `${value.toFixed(1)}%` : '—';\n  }\n\n  function formatCapturedAt(value) {\n    if (typeof value !== 'string' || !value) return '';\n    const date = new Date(value);\n    if (!Number.isFinite(date.getTime())) return '';\n    const pad = part => String(part).padStart(2, '0');\n    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;\n  }\n\n"
           )
 
-          # Renderer: add Captured line between value and health guidance.
           replace_once(
               'RendererHudScript.js',
               "          <div data-r-post style=\"margin-top:2px;font-variant-numeric:tabular-nums\">—</div>\n          <div data-r-message style=\"margin-top:3px;opacity:.78\"></div>",
@@ -64,15 +62,12 @@ jobs:
               "      effectiveRisk,\n      formatCapturedAt,\n      isApproximateWindow,"
           )
 
-          # Renderer regression coverage. Expected value is calculated with the same local timezone
-          # primitives so the test is stable on any CI runner timezone.
           replace_once(
               'tests/renderer-logic.test.js',
               "assert.equal(readyRisk(40, 200).status, 'staleWindow');\n\n",
               "assert.equal(readyRisk(40, 200).status, 'staleWindow');\n\nconst capturedIso = '2026-09-07T07:40:22.000Z';\nconst capturedDate = new Date(capturedIso);\nconst padCaptured = value => String(value).padStart(2, '0');\nconst expectedCaptured = `${capturedDate.getFullYear()}-${padCaptured(capturedDate.getMonth() + 1)}-${padCaptured(capturedDate.getDate())} ${padCaptured(capturedDate.getHours())}:${padCaptured(capturedDate.getMinutes())}`;\nassert.equal(t.formatCapturedAt(capturedIso), expectedCaptured, 'capture time is formatted in local YYYY-MM-DD HH:mm');\nassert.equal(t.formatCapturedAt('not-a-date'), '', 'invalid capture time is hidden');\n\n"
           )
 
-          # README examples and explanation.
           replace_once(
               'README.md',
               "Post-compaction context\n103K / 258K   39.9%\nThis session is in good shape.",
@@ -95,7 +90,6 @@ jobs:
               "```\n\n`Captured` 줄은 Windows의 로컬 시간을 사용하며 신뢰할 수 있는 새 post-compaction snapshot이 확정될 때마다 갱신됩니다. 연속된 컴팩션에서 같은 퍼센트가 나오더라도 캡처 시각을 보면 이전 값이 고정된 것이 아니라 다시 측정된 값인지 바로 확인할 수 있습니다.\n\nRisk bar는 **현재 context가 아니라 마지막 post-compaction context**를 기준으로 합니다."
           )
 
-          # Changelog.
           p = Path('CHANGELOG.md')
           changelog = p.read_text(encoding='utf-8')
           heading = '# Changelog\n\n'
@@ -107,31 +101,25 @@ jobs:
           )
           p.write_text(heading + entry + changelog[len(heading):], encoding='utf-8')
 
-          # Release notes.
           notes = Path('.github/release-notes/v0.1.2.md')
           notes.parent.mkdir(parents=True, exist_ok=True)
-          notes.write_text('''# Codex Session Health HUD v0.1.2
+          notes_text = (
+              '# Codex Session Health HUD v0.1.2\n\n'
+              'A small usability update focused on making post-compaction measurements easier to verify.\n\n'
+              '## What\'s new\n\n'
+              '- The Risk tooltip now shows `Captured YYYY-MM-DD HH:mm` directly below the post-compaction context value.\n'
+              '- The timestamp uses the local system time and updates whenever a new trustworthy post-compaction snapshot is accepted.\n'
+              '- Repeated identical percentages can now be distinguished from a stale value without adding compaction history or changing the state-file schema.\n\n'
+              '## Install / update\n\n'
+              '1. Download `CodexSessionHealthHUD-win-x64.zip` from the release **Assets**.\n'
+              '2. Close Codex completely.\n'
+              '3. Extract the ZIP and double-click `Install-Easy.bat`.\n'
+              '4. Start Codex using **`Codex with Session Health HUD`** from the Windows Start menu.\n'
+              '5. After installation, the downloaded ZIP and extracted folder can be deleted.\n\n'
+              'Existing `%LOCALAPPDATA%\\CodexSessionHealthHUD\\state.json` data is preserved by the installer.\n'
+          )
+          notes.write_text(notes_text, encoding='utf-8')
 
-A small usability update focused on making post-compaction measurements easier to verify.
-
-## What's new
-
-- The Risk tooltip now shows `Captured YYYY-MM-DD HH:mm` directly below the post-compaction context value.
-- The timestamp uses the local system time and updates whenever a new trustworthy post-compaction snapshot is accepted.
-- Repeated identical percentages can now be distinguished from a stale value without adding compaction history or changing the state-file schema.
-
-## Install / update
-
-1. Download `CodexSessionHealthHUD-win-x64.zip` from the release **Assets**.
-2. Close Codex completely.
-3. Extract the ZIP and double-click `Install-Easy.bat`.
-4. Start Codex using **`Codex with Session Health HUD`** from the Windows Start menu.
-5. After installation, the downloaded ZIP and extracted folder can be deleted.
-
-Existing `%LOCALAPPDATA%\\CodexSessionHealthHUD\\state.json` data is preserved by the installer.
-''', encoding='utf-8')
-
-          # Point the one-shot release workflow at v0.1.2. Changing this file intentionally triggers it.
           p = Path('.github/workflows/release.yml')
           release = p.read_text(encoding='utf-8')
           release = release.replace('release-v0-1-1:', 'release-v0-1-2:')
@@ -143,7 +131,6 @@ Existing `%LOCALAPPDATA%\\CodexSessionHealthHUD\\state.json` data is preserved b
               raise SystemExit('release.yml still contains v0.1.1')
           p.write_text(release, encoding='utf-8')
 
-          # This preparatory workflow is intentionally one-shot.
           Path('.github/workflows/prepare-v0.1.2.yml').unlink()
           PY
 
