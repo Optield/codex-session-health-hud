@@ -119,19 +119,6 @@ jobs:
               'Existing `%LOCALAPPDATA%\\CodexSessionHealthHUD\\state.json` data is preserved by the installer.\n'
           )
           notes.write_text(notes_text, encoding='utf-8')
-
-          p = Path('.github/workflows/release.yml')
-          release = p.read_text(encoding='utf-8')
-          release = release.replace('release-v0-1-1:', 'release-v0-1-2:')
-          release = release.replace('Publish v0.1.1', 'Publish v0.1.2')
-          release = release.replace('gh release create v0.1.1', 'gh release create v0.1.2')
-          release = release.replace("--title 'Codex Session Health HUD v0.1.1'", "--title 'Codex Session Health HUD v0.1.2'")
-          release = release.replace('v0.1.1.md', 'v0.1.2.md')
-          if 'v0.1.1' in release:
-              raise SystemExit('release.yml still contains v0.1.1')
-          p.write_text(release, encoding='utf-8')
-
-          Path('.github/workflows/prepare-v0.1.2.yml').unlink()
           PY
 
       - name: Commit v0.1.2 changes
@@ -139,6 +126,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
+          git add RendererHudScript.js tests/renderer-logic.test.js README.md README.ko.md CHANGELOG.md .github/release-notes/v0.1.2.md
           git commit -m 'Show post-compaction capture time'
           git push origin HEAD:main
