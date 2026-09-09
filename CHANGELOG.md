@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 - 2026-09-10
 
 - Preserve valid post-compaction snapshots while thread history is revalidated after thread switches, renderer reloads, or Codex restarts; transient `Syncing` state no longer causes a matching captured snapshot to be discarded as `Not captured`.
+- Keep the existing snapshot only when its compaction ID still matches the latest compaction and its captured token/window payload is valid; a genuinely newer compaction still invalidates the old snapshot as intended.
+- Add regression coverage for matching persisted snapshots, mismatched compaction IDs, and active in-run measurements.
 
 ## 0.1.2 - 2026-09-07
 
