@@ -19,22 +19,18 @@ jobs:
         run: |
           @'
           from pathlib import Path
+          import re
 
           renderer = Path('RendererHudScript.js')
           text = renderer.read_text(encoding='utf-8')
-          old_ready = """    if (runtime.postStatus === 'ready' && runtime.snapshotCompactionId === latestId &&
-            runtime.postTokens >= 0 && runtime.postWindow > 0) return;"""
-          new_ready = """    if (runtime.snapshotCompactionId === latestId &&
-            runtime.postTokens >= 0 && runtime.postWindow > 0) {
-            // `syncing` and `unavailable` are transient validation states. Snapshot validity
-            // comes from matching the latest compaction identity and having a usable payload.
-            runtime.postStatus = 'ready';
-            runtime.captureRunId = '';
-            return;
-          }"""
-          if text.count(old_ready) != 1:
-              raise SystemExit(f'expected one ready reconciliation condition, found {text.count(old_ready)}')
-          text = text.replace(old_ready, new_ready, 1)
+          ready_pattern = re.compile(
+              r"    if \(runtime\.postStatus === 'ready' && runtime\.snapshotCompactionId === latestId &&\n"
+              r"\s+runtime\.postTokens >= 0 && runtime\.postWindow > 0\) return;"
+          )
+          new_ready = "    if (runtime.snapshotCompactionId === latestId &&\n      runtime.postTokens >= 0 && runtime.postWindow > 0) {\n      // `syncing` and `unavailable` are transient validation states. Snapshot validity\n      // comes from matching the latest compaction identity and having a usable payload.\n      runtime.postStatus = 'ready';\n      runtime.captureRunId = '';\n      return;\n    }"
+          text, replacements = ready_pattern.subn(new_ready, text, count=1)
+          if replacements != 1:
+              raise SystemExit(f'expected one ready reconciliation condition, replaced {replacements}')
 
           old_hook = "      effectiveRisk,\n      formatCapturedAt,"
           new_hook = "      effectiveRisk,\n      reconcileSnapshotToHistory,\n      formatCapturedAt,"
