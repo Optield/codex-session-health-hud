@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Preserve valid post-compaction snapshots while thread history is revalidated after thread switches, renderer reloads, or Codex restarts; transient `Syncing` state no longer causes a matching captured snapshot to be discarded as `Not captured`.
+
 ## 0.1.2 - 2026-09-07
 
 - Show the local capture date and time directly under the post-compaction value in the Risk tooltip, making repeated identical percentages verifiably fresh without adding history UI or new persistent state.

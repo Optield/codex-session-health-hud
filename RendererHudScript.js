@@ -453,8 +453,14 @@
 
     if (runtime.postStatus === 'measuring' && runtime.snapshotCompactionId === latestId &&
       runtime.captureRunId === runId) return;
-    if (runtime.postStatus === 'ready' && runtime.snapshotCompactionId === latestId &&
-      runtime.postTokens >= 0 && runtime.postWindow > 0) return;
+    if (runtime.snapshotCompactionId === latestId &&
+      runtime.postTokens >= 0 && runtime.postWindow > 0) {
+      // `syncing` and `unavailable` are transient validation states. Snapshot validity
+      // comes from matching the latest compaction identity and having a usable payload.
+      runtime.postStatus = 'ready';
+      runtime.captureRunId = '';
+      return;
+    }
     if (runtime.postStatus === 'notCaptured' && runtime.snapshotCompactionId === latestId) return;
 
     runtime.postStatus = 'notCaptured';
@@ -1142,6 +1148,7 @@
       codexQuotaWindows,
       remainingPercent,
       effectiveRisk,
+      reconcileSnapshotToHistory,
       formatCapturedAt,
       isApproximateWindow,
       isContextAriaLabel,

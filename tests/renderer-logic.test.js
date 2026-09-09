@@ -81,6 +81,46 @@ const expectedCaptured = `${capturedDate.getFullYear()}-${padCaptured(capturedDa
 assert.equal(t.formatCapturedAt(capturedIso), expectedCaptured, 'capture time is formatted in local YYYY-MM-DD HH:mm');
 assert.equal(t.formatCapturedAt('not-a-date'), '', 'invalid capture time is hidden');
 
+const persistedReadyDuringSync = {
+  postStatus: 'syncing',
+  snapshotCompactionId: 'compact-1',
+  postTokens: 34002,
+  postWindow: 258400,
+  captureRunId: '',
+  capturedAt: capturedIso
+};
+t.reconcileSnapshotToHistory(persistedReadyDuringSync, 'compact-1');
+assert.equal(persistedReadyDuringSync.postStatus, 'ready', 'matching persisted snapshot survives transient syncing state');
+assert.equal(persistedReadyDuringSync.postTokens, 34002, 'matching persisted snapshot keeps captured tokens');
+assert.equal(persistedReadyDuringSync.postWindow, 258400, 'matching persisted snapshot keeps captured window');
+assert.equal(persistedReadyDuringSync.capturedAt, capturedIso, 'matching persisted snapshot keeps capture time');
+
+const mismatchedPersistedSnapshot = {
+  postStatus: 'syncing',
+  snapshotCompactionId: 'compact-1',
+  postTokens: 34002,
+  postWindow: 258400,
+  captureRunId: '',
+  capturedAt: capturedIso
+};
+t.reconcileSnapshotToHistory(mismatchedPersistedSnapshot, 'compact-2');
+assert.equal(mismatchedPersistedSnapshot.postStatus, 'notCaptured', 'different latest compaction invalidates an old snapshot');
+assert.equal(mismatchedPersistedSnapshot.snapshotCompactionId, 'compact-2');
+assert.equal(mismatchedPersistedSnapshot.postTokens, -1);
+assert.equal(mismatchedPersistedSnapshot.postWindow, -1);
+assert.equal(mismatchedPersistedSnapshot.capturedAt, '');
+
+const activeMeasurement = {
+  postStatus: 'measuring',
+  snapshotCompactionId: 'compact-3',
+  postTokens: -1,
+  postWindow: -1,
+  captureRunId: 'test-run',
+  capturedAt: ''
+};
+t.reconcileSnapshotToHistory(activeMeasurement, 'compact-3');
+assert.equal(activeMeasurement.postStatus, 'measuring', 'current-run measurement remains armed during reconciliation');
+
 t.clearRateLimits();
 t.mergeRateLimitSnapshot(t.normalizeRateLimitSnapshot({
   rateLimits: {
