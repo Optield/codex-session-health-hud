@@ -22,35 +22,22 @@ jobs:
 
           renderer = Path('RendererHudScript.js')
           text = renderer.read_text(encoding='utf-8')
-          old = """    if (runtime.postStatus === 'measuring' && runtime.snapshotCompactionId === latestId &&
-              runtime.captureRunId === runId) return;
-            if (runtime.postStatus === 'ready' && runtime.snapshotCompactionId === latestId &&
-              runtime.postTokens >= 0 && runtime.postWindow > 0) return;
-            if (runtime.postStatus === 'notCaptured' && runtime.snapshotCompactionId === latestId) return;
-          """
-          new = """    if (runtime.postStatus === 'measuring' && runtime.snapshotCompactionId === latestId &&
-              runtime.captureRunId === runId) return;
-            if (runtime.snapshotCompactionId === latestId &&
-              runtime.postTokens >= 0 && runtime.postWindow > 0) {
-              // `syncing` and `unavailable` are transient validation states. Snapshot validity
-              // comes from matching the latest compaction identity and having a usable payload.
-              runtime.postStatus = 'ready';
-              runtime.captureRunId = '';
-              return;
-            }
-            if (runtime.postStatus === 'notCaptured' && runtime.snapshotCompactionId === latestId) return;
-          """
-          if text.count(old) != 1:
-              raise SystemExit(f'expected one reconciliation block, found {text.count(old)}')
-          text = text.replace(old, new, 1)
+          old_ready = """    if (runtime.postStatus === 'ready' && runtime.snapshotCompactionId === latestId &&
+            runtime.postTokens >= 0 && runtime.postWindow > 0) return;"""
+          new_ready = """    if (runtime.snapshotCompactionId === latestId &&
+            runtime.postTokens >= 0 && runtime.postWindow > 0) {
+            // `syncing` and `unavailable` are transient validation states. Snapshot validity
+            // comes from matching the latest compaction identity and having a usable payload.
+            runtime.postStatus = 'ready';
+            runtime.captureRunId = '';
+            return;
+          }"""
+          if text.count(old_ready) != 1:
+              raise SystemExit(f'expected one ready reconciliation condition, found {text.count(old_ready)}')
+          text = text.replace(old_ready, new_ready, 1)
 
-          old_hook = """      effectiveRisk,
-                formatCapturedAt,
-          """
-          new_hook = """      effectiveRisk,
-                reconcileSnapshotToHistory,
-                formatCapturedAt,
-          """
+          old_hook = "      effectiveRisk,\n      formatCapturedAt,"
+          new_hook = "      effectiveRisk,\n      reconcileSnapshotToHistory,\n      formatCapturedAt,"
           if text.count(old_hook) != 1:
               raise SystemExit(f'expected one test-hook block, found {text.count(old_hook)}')
           text = text.replace(old_hook, new_hook, 1)
@@ -58,9 +45,7 @@ jobs:
 
           tests = Path('tests/renderer-logic.test.js')
           test_text = tests.read_text(encoding='utf-8')
-          marker = """assert.equal(t.formatCapturedAt('not-a-date'), '', 'invalid capture time is hidden');
-
-          """
+          marker = "assert.equal(t.formatCapturedAt('not-a-date'), '', 'invalid capture time is hidden');\n\n"
           addition = """assert.equal(t.formatCapturedAt('not-a-date'), '', 'invalid capture time is hidden');
 
           const persistedReadyDuringSync = {
