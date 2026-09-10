@@ -19,27 +19,35 @@ jobs:
         run: |
           @'
           from pathlib import Path
+          import re
 
           renderer = Path('RendererHudScript.js')
           text = renderer.read_text(encoding='utf-8')
 
-          old_refresh = """  function refreshActiveThread() {
-            if (disposed || document.hidden) return;
-            setActiveThread(resolveActiveThread());
-          }
-          """
-          new_refresh = """  function refreshActiveThread() {
-            if (disposed || document.hidden) return;
-            const threadId = resolveActiveThread();
-            setActiveThread(threadId);
-            if (threadId && hydrateCurrentUsageFromConversation(threadId)) renderRisk();
-          }
-          """
-          if text.count(old_refresh) != 1:
-              raise SystemExit(f'expected one refreshActiveThread block, found {text.count(old_refresh)}')
-          text = text.replace(old_refresh, new_refresh, 1)
+          refresh_pattern = re.compile(
+              r"  function refreshActiveThread\(\) \{\n"
+              r"\s+if \(disposed \|\| document\.hidden\) return;\n"
+              r"\s+setActiveThread\(resolveActiveThread\(\)\);\n"
+              r"\s+\}"
+          )
+          refresh_replacement = (
+              "  function refreshActiveThread() {\n"
+              "    if (disposed || document.hidden) return;\n"
+              "    const threadId = resolveActiveThread();\n"
+              "    setActiveThread(threadId);\n"
+              "    if (threadId && hydrateCurrentUsageFromConversation(threadId)) renderRisk();\n"
+              "  }"
+          )
+          text, count = refresh_pattern.subn(refresh_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'expected one refreshActiveThread block, replaced {count}')
 
-          normalize_block = """  function normalizeTokenUsage(params) {
+          normalize_pattern = re.compile(
+              r"  function normalizeTokenUsage\(params\) \{\n.*?\n  \}\n\n"
+              r"  function handleTokenUsage\(params\) \{",
+              re.S,
+          )
+          normalize_replacement = """  function normalizeTokenUsage(params) {
             const usage = first(params, ['tokenUsage', 'token_usage']) || params;
             if (!usage || typeof usage !== 'object') return null;
             const last = first(usage, ['last', 'lastTokenUsage', 'last_token_usage']);
@@ -50,8 +58,7 @@ jobs:
             const sessionTotal = total && typeof total === 'object' ? number(first(total, ['totalTokens', 'total_tokens'])) : null;
             return { last, lastTotal, sessionTotal, windowSize, measured: usageBreakdownMeasured(last) };
           }
-          """
-          helpers = normalize_block + """
+
           function applyUsageTelemetry(runtime, parsed, onlyMissing = false) {
             if (!runtime || !parsed) return false;
             let changed = false;
@@ -100,55 +107,59 @@ jobs:
               return false;
             }
           }
-          """
-          if text.count(normalize_block) != 1:
-              raise SystemExit(f'expected one normalizeTokenUsage block, found {text.count(normalize_block)}')
-          text = text.replace(normalize_block, helpers, 1)
 
-          old_assign = """    const runtime = threadRuntime(threadId);
-            if (parsed.lastTotal !== null && parsed.lastTotal >= 0) runtime.currentContextTokens = parsed.lastTotal;
-            if (parsed.windowSize !== null && parsed.windowSize > 0) runtime.currentContextWindow = parsed.windowSize;
-            runtime.currentContextPercent = ratioPercent(runtime.currentContextTokens, runtime.currentContextWindow) ?? -1;
-            if (parsed.sessionTotal !== null && parsed.sessionTotal >= 0) runtime.sessionTotalTokens = parsed.sessionTotal;
-          """
-          new_assign = """    const runtime = threadRuntime(threadId);
-            applyUsageTelemetry(runtime, parsed, false);
-          """
-          if text.count(old_assign) != 1:
-              raise SystemExit(f'expected one live usage assignment block, found {text.count(old_assign)}')
-          text = text.replace(old_assign, new_assign, 1)
+          function handleTokenUsage(params) {"""
+          text, count = normalize_pattern.subn(normalize_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'expected one normalizeTokenUsage/handleTokenUsage boundary, replaced {count}')
 
-          old_tooltip = """    const tooltip = ensureRiskTooltip();
-            const runtime = threadRuntime(activeThreadId);
-            const risk = effectiveRisk(runtime);
-          """
-          new_tooltip = """    const tooltip = ensureRiskTooltip();
-            const runtime = threadRuntime(activeThreadId);
-            if (runtime) hydrateCurrentUsageFromConversation(activeThreadId);
-            const risk = effectiveRisk(runtime);
-          """
-          if text.count(old_tooltip) != 1:
-              raise SystemExit(f'expected one risk tooltip bootstrap block, found {text.count(old_tooltip)}')
-          text = text.replace(old_tooltip, new_tooltip, 1)
+          assign_pattern = re.compile(
+              r"    const runtime = threadRuntime\(threadId\);\n"
+              r"\s+if \(parsed\.lastTotal !== null && parsed\.lastTotal >= 0\) runtime\.currentContextTokens = parsed\.lastTotal;\n"
+              r"\s+if \(parsed\.windowSize !== null && parsed\.windowSize > 0\) runtime\.currentContextWindow = parsed\.windowSize;\n"
+              r"\s+runtime\.currentContextPercent = ratioPercent\(runtime\.currentContextTokens, runtime\.currentContextWindow\) \?\? -1;\n"
+              r"\s+if \(parsed\.sessionTotal !== null && parsed\.sessionTotal >= 0\) runtime\.sessionTotalTokens = parsed\.sessionTotal;"
+          )
+          assign_replacement = (
+              "    const runtime = threadRuntime(threadId);\n"
+              "    applyUsageTelemetry(runtime, parsed, false);"
+          )
+          text, count = assign_pattern.subn(assign_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'expected one live usage assignment block, replaced {count}')
 
-          old_hook = """      normalizeTokenUsage,
-                usageBreakdownMeasured,
-          """
-          new_hook = """      normalizeTokenUsage,
-                applyUsageTelemetry,
-                hydrateCurrentUsageFromSnapshot,
-                usageBreakdownMeasured,
-          """
-          if text.count(old_hook) != 1:
-              raise SystemExit(f'expected one test hook block, found {text.count(old_hook)}')
-          text = text.replace(old_hook, new_hook, 1)
+          tooltip_pattern = re.compile(
+              r"    const tooltip = ensureRiskTooltip\(\);\n"
+              r"\s+const runtime = threadRuntime\(activeThreadId\);\n"
+              r"\s+const risk = effectiveRisk\(runtime\);"
+          )
+          tooltip_replacement = (
+              "    const tooltip = ensureRiskTooltip();\n"
+              "    const runtime = threadRuntime(activeThreadId);\n"
+              "    if (runtime) hydrateCurrentUsageFromConversation(activeThreadId);\n"
+              "    const risk = effectiveRisk(runtime);"
+          )
+          text, count = tooltip_pattern.subn(tooltip_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'expected one risk tooltip bootstrap block, replaced {count}')
+
+          hook_pattern = re.compile(
+              r"      normalizeTokenUsage,\n\s+usageBreakdownMeasured,"
+          )
+          hook_replacement = (
+              "      normalizeTokenUsage,\n"
+              "      applyUsageTelemetry,\n"
+              "      hydrateCurrentUsageFromSnapshot,\n"
+              "      usageBreakdownMeasured,"
+          )
+          text, count = hook_pattern.subn(hook_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'expected one test hook block, replaced {count}')
           renderer.write_text(text, encoding='utf-8')
 
           tests = Path('tests/renderer-logic.test.js')
           test_text = tests.read_text(encoding='utf-8')
-          marker = """assert.equal(localEstimate.measured, false, 'all-zero local re-estimate is rejected for post-compaction capture');
-
-          """
+          marker = "assert.equal(localEstimate.measured, false, 'all-zero local re-estimate is rejected for post-compaction capture');\n\n"
           addition = marker + """const rendererSnapshot = {
             last: {
               totalTokens: 132304,
