@@ -17,7 +17,7 @@ HUD는 Codex의 composer toolbar에 삽입되며 **기존 native context ring �
   <img src="assets/hud-composer.svg" alt="주간 Usage, Post-compaction Risk, Codex native context ring이 함께 표시된 composer toolbar" width="310">
 </p>
 
-Native context ring은 수정하지 않습니다. 대신 Codex가 한 화면에서 제공하지 않는 post-compaction pressure, 컴팩션 횟수, 세션 누적 토큰, 5시간/주간 quota를 작고 정돈된 형태로 추가합니다.
+Native context ring은 수정하지 않습니다. 대신 Codex가 한 화면에서 제공하지 않는 post-compaction pressure, 컴팩션 횟수, 5시간/주간 quota를 작고 정돈된 형태로 추가합니다.
 
 ## Post-compaction Risk
 
@@ -46,9 +46,6 @@ Current context
 
 Compactions
 3
-
-Session tokens
-12.84M
 ```
 
 `Captured` 줄은 Windows의 로컬 시간을 사용하며 신뢰할 수 있는 새 post-compaction snapshot이 확정될 때마다 갱신됩니다. 연속된 컴팩션에서 같은 퍼센트가 나오더라도 캡처 시각을 보면 이전 값이 고정된 것이 아니라 다시 측정된 값인지 바로 확인할 수 있습니다.
@@ -73,19 +70,18 @@ Risk bar는 **현재 context가 아니라 마지막 post-compaction context**를
 
 이 상태에서는 이후 새로 들어오는 코드 변화, 오류 원인, 사용자 요구사항, 도구 결과와 판단 근거를 저장할 공간이 더 빠르게 줄어듭니다. 그리고 다시 컴팩션이 필요해질 때는 새로 쌓인 정보와 기존 retained state가 더 좁은 예산 안에서 경쟁하게 되므로, 유용한 정보를 버리지 않으면서 압축할 수 있는 여유도 작아집니다. 이것이 곧바로 품질 저하를 의미하는 것은 아니지만, 장시간 반복되면 **이전 제약을 놓치거나, 이미 한 작업을 반복하거나, 세부 맥락 회수가 약해지거나, 추론의 일관성이 떨어지는** 식의 현상으로 나타날 가능성이 커집니다. 사용자가 흔히 “세션이 길어지면서 모델이 점점 둔해진 것 같다”고 느끼는 종류의 저하입니다.
 
-즉 65%는 세션 사용 시간이나 임의의 누적 토큰 수로 정한 숫자가 아닙니다. **직전 컴팩션이 다음 기본 컴팩션 영역까지 effective-window runway를 약 1/3도 회복하지 못했고, 동시에 usable context의 거의 2/3가 이미 retained state로 점유된 지점**을 경계로 삼은 것입니다. 장시간 이어지는 작업에서는 이 시점부터 “그대로 계속 사용”보다 “새 세션으로 경계를 정리할지 고려”하는 것이 합리적인 운영 판단이 됩니다.
+즉 65%는 세션 사용 시간 같은 간접 지표로 정한 숫자가 아닙니다. **직전 컴팩션이 다음 기본 컴팩션 영역까지 effective-window runway를 약 1/3도 회복하지 못했고, 동시에 usable context의 거의 2/3가 이미 retained state로 점유된 지점**을 경계로 삼은 것입니다. 장시간 이어지는 작업에서는 이 시점부터 “그대로 계속 사용”보다 “새 세션으로 경계를 정리할지 고려”하는 것이 합리적인 운영 판단이 됩니다.
 
-사용자가 context window나 auto-compaction 설정을 직접 변경하면 정확한 runway는 달라질 수 있으므로 색상은 어디까지나 판단을 돕는 지표입니다. **컴팩션 횟수와 세션 누적 토큰은 별도로 표시되며 Risk bar의 색상 계산에는 관여하지 않습니다.**
+사용자가 context window나 auto-compaction 설정을 직접 변경하면 정확한 runway는 달라질 수 있으므로 색상은 어디까지나 판단을 돕는 지표입니다. **컴팩션 횟수는 별도로 표시되며 Risk bar의 색상 계산에는 관여하지 않습니다.**
 
 ## 컨텍스트를 어떻게 측정하는가
 
 이 HUD는 transcript 길이나 문자 수로 context를 추정하지 않습니다.
 
-현재 Codex는 thread usage를 `last`, `total`, `modelContextWindow`로 제공합니다. Codex 본체에서 `last.totalTokens`는 최신 active context 크기, `total.totalTokens`는 세션 누적 사용량으로 취급되므로 HUD도 동일한 의미를 사용합니다.
+현재 Codex가 제공하는 `last.totalTokens`와 `modelContextWindow`를 사용해 active context를 표시합니다.
 
 ```text
 Current context  = tokenUsage.last.totalTokens
-Session tokens   = tokenUsage.total.totalTokens
 Context window   = tokenUsage.modelContextWindow
 ```
 
@@ -114,7 +110,6 @@ Risk indicator가 핵심 기능이지만, composer를 복잡한 모니터링 화
 
 - **Current context** — Codex가 보고한 최신 active context 크기와 effective context window
 - **Compactions** — 현재 thread의 history와 동기화된 컴팩션 횟수
-- **Session tokens** — 해당 thread의 누적 token 사용량. 참고 정보일 뿐 Risk 계산에는 사용하지 않음
 - **Usage limits** — Codex가 보고한 계정 단위 5시간/주간 quota
 
 ### 주간 Usage bar
@@ -292,7 +287,7 @@ HUD 자체가 외부 네트워크 요청을 추가로 보내지 않으며 DevToo
 이 프로젝트는 다음 두 MIT license Windows 프로젝트에서 상당한 아이디어와 구현 영감을 받았습니다.
 
 - [`wtf12345789/codex-context-hud`](https://github.com/wtf12345789/codex-context-hud) — packaged app launcher, local DevTools attach, composer-integrated HUD 개념
-- [`LH-03/codex-monitor-hud`](https://github.com/LH-03/codex-monitor-hud) — context/quota monitoring 아이디어와 cumulative token/session 정보 표시
+- [`LH-03/codex-monitor-hud`](https://github.com/LH-03/codex-monitor-hud) — context/quota monitoring 아이디어와 compact status 표시
 
 Codex Session Health HUD는 두 저장소를 단순 병합한 결과가 아닙니다. 구현 과정에서 현재 `openai/codex`를 기준으로 관련 가정을 다시 검증했습니다. deprecated compaction notification은 fallback으로 이동했고, active context는 `last.totalTokens`에 맞췄으며, sparse rate-limit notification merge를 반영했습니다. 또한 resident path에서 JSONL/SQLite monitoring을 제거하고 renderer/CDP 구조를 좁혀 polling, parsing, DOM 작업량을 줄였습니다.
 

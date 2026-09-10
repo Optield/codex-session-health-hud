@@ -33,12 +33,10 @@ const measuredUsage = t.normalizeTokenUsage({
       outputTokens: 5184,
       reasoningOutputTokens: 900
     },
-    total: { totalTokens: 12840000 },
     modelContextWindow: 258400
   }
 });
 assert.equal(measuredUsage.lastTotal, 103184, 'active context uses last.totalTokens');
-assert.equal(measuredUsage.sessionTotal, 12840000, 'session total uses total.totalTokens');
 assert.equal(measuredUsage.windowSize, 258400, 'effective context window is used as reported');
 assert.equal(measuredUsage.measured, true, 'non-zero breakdown is measured usage');
 
@@ -52,7 +50,6 @@ const localEstimate = t.normalizeTokenUsage({
       outputTokens: 0,
       reasoningOutputTokens: 0
     },
-    total: { totalTokens: 12840000 },
     modelContextWindow: 258400
   }
 });
@@ -67,14 +64,12 @@ const rendererSnapshot = {
     outputTokens: 315,
     reasoningOutputTokens: 173
   },
-  total: { totalTokens: 32145397 },
   modelContextWindow: 258400
 };
 const missingLiveUsage = {
   currentContextTokens: -1,
   currentContextWindow: -1,
   currentContextPercent: -1,
-  sessionTotalTokens: -1,
   postStatus: 'ready',
   postTokens: 34002,
   postWindow: 258400
@@ -83,7 +78,6 @@ assert.equal(t.hydrateCurrentUsageFromSnapshot(missingLiveUsage, rendererSnapsho
   'renderer snapshot hydrates usage missed during startup replay');
 assert.equal(missingLiveUsage.currentContextTokens, 132304);
 assert.equal(missingLiveUsage.currentContextWindow, 258400);
-assert.equal(missingLiveUsage.sessionTotalTokens, 32145397);
 assert.equal(missingLiveUsage.currentContextPercent, 132304 * 100 / 258400);
 assert.equal(missingLiveUsage.postStatus, 'ready', 'usage hydration does not change post-compaction state');
 assert.equal(missingLiveUsage.postTokens, 34002, 'usage hydration does not replace post-compaction tokens');
@@ -92,33 +86,18 @@ const newerLiveUsage = {
   currentContextTokens: 150000,
   currentContextWindow: 258400,
   currentContextPercent: 150000 * 100 / 258400,
-  sessionTotalTokens: 33000000
 };
 assert.equal(t.hydrateCurrentUsageFromSnapshot(newerLiveUsage, rendererSnapshot), false,
   'renderer fallback never overwrites already observed live telemetry');
 assert.equal(newerLiveUsage.currentContextTokens, 150000);
-assert.equal(newerLiveUsage.sessionTotalTokens, 33000000);
-
-const partialLiveUsage = {
-  currentContextTokens: 150000,
-  currentContextWindow: 258400,
-  currentContextPercent: 150000 * 100 / 258400,
-  sessionTotalTokens: -1
-};
-assert.equal(t.hydrateCurrentUsageFromSnapshot(partialLiveUsage, rendererSnapshot), true,
-  'renderer fallback can fill a missing session total without replacing current context');
-assert.equal(partialLiveUsage.currentContextTokens, 150000);
-assert.equal(partialLiveUsage.sessionTotalTokens, 32145397);
 
 const liveUpdate = t.normalizeTokenUsage({ tokenUsage: {
   last: { totalTokens: 160000, inputTokens: 159000, cachedInputTokens: 120000, outputTokens: 1000 },
-  total: { totalTokens: 34000000 },
   modelContextWindow: 258400
 }});
-assert.equal(t.applyUsageTelemetry(partialLiveUsage, liveUpdate, false), true,
+assert.equal(t.applyUsageTelemetry(missingLiveUsage, liveUpdate, false), true,
   'live telemetry remains authoritative after renderer hydration');
-assert.equal(partialLiveUsage.currentContextTokens, 160000);
-assert.equal(partialLiveUsage.sessionTotalTokens, 34000000);
+assert.equal(missingLiveUsage.currentContextTokens, 160000);
 
 function readyRisk(percent, currentWindow = 100) {
   return t.effectiveRisk({

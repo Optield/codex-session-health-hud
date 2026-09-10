@@ -130,7 +130,6 @@
       currentContextTokens: -1,
       currentContextWindow: -1,
       currentContextPercent: -1,
-      sessionTotalTokens: -1,
       compactionCount: saved && Number.isInteger(saved.compactionCount) ? saved.compactionCount : -1,
       lastObservedCompactionId: saved ? stringValue(saved.lastObservedCompactionId) : '',
       snapshotCompactionId: saved ? stringValue(saved.snapshotCompactionId) : '',
@@ -532,12 +531,10 @@
     const usage = first(params, ['tokenUsage', 'token_usage']) || params;
     if (!usage || typeof usage !== 'object') return null;
     const last = first(usage, ['last', 'lastTokenUsage', 'last_token_usage']);
-    const total = first(usage, ['total', 'totalTokenUsage', 'total_token_usage']);
     const windowSize = number(first(usage, ['modelContextWindow', 'model_context_window', 'contextWindow', 'context_window']));
     if (!last || typeof last !== 'object') return null;
     const lastTotal = number(first(last, ['totalTokens', 'total_tokens']));
-    const sessionTotal = total && typeof total === 'object' ? number(first(total, ['totalTokens', 'total_tokens'])) : null;
-    return { last, lastTotal, sessionTotal, windowSize, measured: usageBreakdownMeasured(last) };
+    return { last, lastTotal, windowSize, measured: usageBreakdownMeasured(last) };
   }
 
   function applyUsageTelemetry(runtime, parsed, onlyMissing = false) {
@@ -552,11 +549,6 @@
       (!onlyMissing || runtime.currentContextWindow <= 0)) {
       changed = changed || runtime.currentContextWindow !== parsed.windowSize;
       runtime.currentContextWindow = parsed.windowSize;
-    }
-    if (parsed.sessionTotal !== null && parsed.sessionTotal >= 0 &&
-      (!onlyMissing || runtime.sessionTotalTokens < 0)) {
-      changed = changed || runtime.sessionTotalTokens !== parsed.sessionTotal;
-      runtime.sessionTotalTokens = parsed.sessionTotal;
     }
     const percent = ratioPercent(runtime.currentContextTokens, runtime.currentContextWindow) ?? -1;
     if (runtime.currentContextPercent !== percent) {
@@ -575,8 +567,7 @@
     const runtime = threadRuntime(threadId);
     if (!runtime) return false;
     const needsCurrent = runtime.currentContextTokens < 0 || runtime.currentContextWindow <= 0;
-    const needsSessionTotal = runtime.sessionTotalTokens < 0;
-    if (!needsCurrent && !needsSessionTotal) return false;
+    if (!needsCurrent) return false;
 
     const manager = conversationManager();
     if (!manager || typeof manager.getConversation !== 'function') return false;
@@ -950,7 +941,6 @@
         <div style="display:grid;grid-template-columns:1fr auto;gap:5px 18px">
           <span style="opacity:.72">Current context</span><span data-r-current style="font-variant-numeric:tabular-nums">—</span>
           <span style="opacity:.72">Compactions</span><span data-r-count style="font-variant-numeric:tabular-nums">—</span>
-          <span style="opacity:.72">Session tokens</span><span data-r-total style="font-variant-numeric:tabular-nums">—</span>
         </div>
       </div>`;
     return riskTooltip;
@@ -975,7 +965,6 @@
     const message = tooltip.querySelector('[data-r-message]');
     const current = tooltip.querySelector('[data-r-current]');
     const count = tooltip.querySelector('[data-r-count]');
-    const total = tooltip.querySelector('[data-r-total]');
     if (risk.status === 'ready' || risk.status === 'staleWindow') {
       post.textContent = `${formatTokens(runtime.postTokens)} / ${formatTokens(runtime.postWindow)}   ${formatPercent(risk.percent)}`;
     } else if (risk.status === 'measuring') {
@@ -997,7 +986,6 @@
       current.textContent = '—';
     }
     count.textContent = runtime && Number.isInteger(runtime.compactionCount) && runtime.compactionCount >= 0 ? String(runtime.compactionCount) : '…';
-    total.textContent = runtime && runtime.sessionTotalTokens >= 0 ? formatTokens(runtime.sessionTotalTokens) : '—';
   }
 
   function positionTooltip(tooltip, anchor) {

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Remove the `Session tokens` field and its cumulative-session telemetry path; the Risk tooltip now focuses on post-compaction context, current context, and compaction count.
+- Keep renderer-state hydration only for missing current-context telemetry.
+
 ## 0.1.4 - 2026-09-10
 
 - Hydrate missing `Current context` and `Session tokens` from Codex Desktop's already-loaded `latestTokenUsageInfo` when the injected HUD misses the startup/thread-reentry token-usage replay.

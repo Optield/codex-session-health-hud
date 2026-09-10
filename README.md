@@ -17,7 +17,7 @@ Instead of opening a separate monitoring window, the HUD is inserted cleanly int
   <img src="assets/hud-composer.svg" alt="Codex composer toolbar with weekly usage, post-compaction risk, and the native context ring" width="310">
 </p>
 
-The native ring is left untouched. The HUD adds only the information Codex does not currently surface together: post-compaction pressure, compaction count, cumulative session tokens, and both account quota windows.
+The native ring is left untouched. The HUD adds only the information Codex does not currently surface together: post-compaction pressure, compaction count, and both account quota windows.
 
 ## Post-compaction risk
 
@@ -46,9 +46,6 @@ Current context
 
 Compactions
 3
-
-Session tokens
-12.84M
 ```
 
 The `Captured` line uses the local system time and is refreshed whenever a new trustworthy post-compaction snapshot is accepted. If two compactions happen to produce the same percentage, the timestamp makes it easy to confirm that the value was measured again rather than left stale.
@@ -73,17 +70,16 @@ That leaves less room for subsequent observations and decisions before another c
 
 The 65% transition is therefore not based on session age or an arbitrary token count. It marks a point where both signals become meaningful at the same time: the previous compaction has restored **less than about one third of effective-window runway**, while almost two thirds of the usable context is already occupied by retained state. For long-running work, that is a practical boundary between “continue normally” and “start considering a clean session boundary.”
 
-Custom context-window or auto-compaction settings can shift the exact runway, so the colors remain guidance rather than a quality guarantee. **Compaction count and cumulative session tokens are shown separately and do not affect the risk color.**
+Custom context-window or auto-compaction settings can shift the exact runway, so the colors remain guidance rather than a quality guarantee. **Compaction count is shown separately and does not affect the risk color.**
 
 ## Measurement model
 
 The HUD deliberately avoids estimating context from transcript length.
 
-Current Codex exposes thread usage as `last`, `total`, and `modelContextWindow`. Codex itself defines the latest `last.totalTokens` as the active context size and `total.totalTokens` as cumulative session usage. The HUD therefore uses:
+Current Codex exposes the active context through `last.totalTokens` together with `modelContextWindow`. The HUD therefore uses:
 
 ```text
 Current context  = tokenUsage.last.totalTokens
-Session tokens   = tokenUsage.total.totalTokens
 Context window   = tokenUsage.modelContextWindow
 ```
 
@@ -112,7 +108,6 @@ The risk indicator is the main signal, but its hover card also keeps a small set
 
 - **Current context** — the latest active context size and effective context window reported by Codex.
 - **Compactions** — the reconciled compaction count for the current thread.
-- **Session tokens** — cumulative token usage for the thread; informative only and not part of the risk calculation.
 - **Usage limits** — account-level 5-hour and weekly quota information reported by Codex.
 
 ### Weekly usage bar
@@ -290,7 +285,7 @@ The HUD makes no external network requests of its own. The DevTools endpoint is 
 This project draws substantial inspiration and implementation ideas from two MIT-licensed Windows projects:
 
 - [`wtf12345789/codex-context-hud`](https://github.com/wtf12345789/codex-context-hud) — packaged-app launching, local DevTools attachment, and the concept of a compact composer-integrated HUD.
-- [`LH-03/codex-monitor-hud`](https://github.com/LH-03/codex-monitor-hud) — context/quota monitoring ideas and the value of exposing cumulative token/session information.
+- [`LH-03/codex-monitor-hud`](https://github.com/LH-03/codex-monitor-hud) — context/quota monitoring ideas and compact status presentation.
 
 Codex Session Health HUD is not a mechanical merge of those repositories. During implementation, the relevant assumptions were revalidated against current `openai/codex`: deprecated compaction notifications were moved to fallback status, active-context accounting was aligned with `last.totalTokens`, quota merging was updated for sparse rate-limit notifications, JSONL/SQLite monitoring was removed from the resident path, and the renderer/CDP architecture was narrowed to reduce polling, parsing, and DOM work.
 
