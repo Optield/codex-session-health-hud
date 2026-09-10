@@ -14,17 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract and run embedded removal patch
+      - name: Apply session-token removal
         shell: pwsh
-        run: |
-          $workflow = Get-Content -LiteralPath '.github/workflows/remove-session-tokens.yml' -Raw
-          $match = [regex]::Match($workflow, '(?ms)PATCH_B64: \|\r?\n(?<body>(?: {12}[A-Za-z0-9+/=]+\r?\n?)+)')
-          if (-not $match.Success) { throw 'Could not locate embedded removal patch.' }
-          $encoded = (($match.Groups['body'].Value -split '\r?\n') | ForEach-Object { $_.Trim() }) -join ''
-          $bytes = [Convert]::FromBase64String($encoded)
-          $patch = Join-Path $env:RUNNER_TEMP 'remove-session-tokens.py'
-          [IO.File]::WriteAllBytes($patch, $bytes)
-          python $patch
+        run: python .\scripts\remove-session-tokens-once.py
 
       - name: Verify Session tokens are gone from product code and READMEs
         shell: pwsh
