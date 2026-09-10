@@ -175,6 +175,12 @@ For normal Windows use, install from the latest GitHub Release:
 
 `Install-Easy.bat` installs only the files already present in that ZIP. It does **not** download code, use PowerShell `-EncodedCommand`, disable Microsoft Defender, or add antivirus exclusions.
 
+#### Windows security prompts on first run
+
+Because the HUD executable is distributed directly from GitHub and is not currently code-signed, Windows may perform a Microsoft Defender SmartScreen reputation check the first time a newly downloaded version is run. SmartScreen evaluates publisher reputation and the reputation of the specific file hash, so a newly built unsigned release can be checked or warned about again even if you used an earlier version without a prompt. **A SmartScreen reputation check or an “unrecognized app” warning by itself is not the same thing as a malware detection.** Continue only after confirming that you downloaded `CodexSessionHealthHUD-win-x64.zip` from this repository's official GitHub Release **Assets**. If Microsoft Defender explicitly identifies malware or quarantines the file, do not bypass that detection; stop and report it.
+
+On some systems, Windows may also show **`Open File - Security Warning`** with **`Publisher: Unknown Publisher`**. If that dialog includes **`Always ask before opening this file`**, clear (uncheck) that box before choosing **`Run`** if you do not want the same prompt every time you launch that specific file. The checkbox means Windows should keep asking before opening that file, so clearing it is the convenient choice for a file you have already verified. This is a per-file setting, so a newly downloaded HUD release may prompt again. You do not need to disable Microsoft Defender or add an antivirus exclusion.
+
 The installer places the HUD in:
 
 ```text
