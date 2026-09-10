@@ -1,8 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 - 2026-09-10
 
-- Hydrate missing `Current context` and `Session tokens` from Codex Desktop's already-loaded `latestTokenUsageInfo` when the injected HUD misses the startup/thread-reentry token-usage replay; live token-usage events remain authoritative and existing persisted HUD state is unchanged.
+- Hydrate missing `Current context` and `Session tokens` from Codex Desktop's already-loaded `latestTokenUsageInfo` when the injected HUD misses the startup/thread-reentry token-usage replay.
+- Fill only telemetry fields that are still missing, so an already-observed live `thread/tokenUsage/updated` value is never replaced by the renderer-state fallback.
+- Keep post-compaction snapshot state and the persistent state schema unchanged; the fallback performs no extra app-server resume/read request and does not read Codex JSONL or SQLite data.
+- Add regression coverage for full hydration, partial hydration, preservation of existing live telemetry, and live-event updates after fallback hydration.
 
 ## 0.1.3 - 2026-09-10
 
