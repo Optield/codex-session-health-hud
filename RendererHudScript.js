@@ -276,7 +276,9 @@
 
   function refreshActiveThread() {
     if (disposed || document.hidden) return;
-    setActiveThread(resolveActiveThread());
+    const threadId = resolveActiveThread();
+    setActiveThread(threadId);
+    if (threadId && hydrateCurrentUsageFromConversation(threadId)) renderRisk();
   }
 
   function scheduleActiveThreadRefresh(delay = 120) {
@@ -527,27 +529,73 @@
   }
 
   function normalizeTokenUsage(params) {
-    const usage = first(params, ['tokenUsage', 'token_usage']) || params;
-    if (!usage || typeof usage !== 'object') return null;
-    const last = first(usage, ['last', 'lastTokenUsage', 'last_token_usage']);
-    const total = first(usage, ['total', 'totalTokenUsage', 'total_token_usage']);
-    const windowSize = number(first(usage, ['modelContextWindow', 'model_context_window', 'contextWindow', 'context_window']));
-    if (!last || typeof last !== 'object') return null;
-    const lastTotal = number(first(last, ['totalTokens', 'total_tokens']));
-    const sessionTotal = total && typeof total === 'object' ? number(first(total, ['totalTokens', 'total_tokens'])) : null;
-    return { last, lastTotal, sessionTotal, windowSize, measured: usageBreakdownMeasured(last) };
-  }
+  const usage = first(params, ['tokenUsage', 'token_usage']) || params;
+  if (!usage || typeof usage !== 'object') return null;
+  const last = first(usage, ['last', 'lastTokenUsage', 'last_token_usage']);
+  const total = first(usage, ['total', 'totalTokenUsage', 'total_token_usage']);
+  const windowSize = number(first(usage, ['modelContextWindow', 'model_context_window', 'contextWindow', 'context_window']));
+  if (!last || typeof last !== 'object') return null;
+  const lastTotal = number(first(last, ['totalTokens', 'total_tokens']));
+  const sessionTotal = total && typeof total === 'object' ? number(first(total, ['totalTokens', 'total_tokens'])) : null;
+  return { last, lastTotal, sessionTotal, windowSize, measured: usageBreakdownMeasured(last) };
+}
 
-  function handleTokenUsage(params) {
+function applyUsageTelemetry(runtime, parsed, onlyMissing = false) {
+  if (!runtime || !parsed) return false;
+  let changed = false;
+  if (parsed.lastTotal !== null && parsed.lastTotal >= 0 &&
+    (!onlyMissing || runtime.currentContextTokens < 0)) {
+    changed = changed || runtime.currentContextTokens !== parsed.lastTotal;
+    runtime.currentContextTokens = parsed.lastTotal;
+  }
+  if (parsed.windowSize !== null && parsed.windowSize > 0 &&
+    (!onlyMissing || runtime.currentContextWindow <= 0)) {
+    changed = changed || runtime.currentContextWindow !== parsed.windowSize;
+    runtime.currentContextWindow = parsed.windowSize;
+  }
+  if (parsed.sessionTotal !== null && parsed.sessionTotal >= 0 &&
+    (!onlyMissing || runtime.sessionTotalTokens < 0)) {
+    changed = changed || runtime.sessionTotalTokens !== parsed.sessionTotal;
+    runtime.sessionTotalTokens = parsed.sessionTotal;
+  }
+  const percent = ratioPercent(runtime.currentContextTokens, runtime.currentContextWindow) ?? -1;
+  if (runtime.currentContextPercent !== percent) {
+    runtime.currentContextPercent = percent;
+    changed = true;
+  }
+  return changed;
+}
+
+function hydrateCurrentUsageFromSnapshot(runtime, snapshot) {
+  const parsed = normalizeTokenUsage(snapshot);
+  return parsed ? applyUsageTelemetry(runtime, parsed, true) : false;
+}
+
+function hydrateCurrentUsageFromConversation(threadId) {
+  const runtime = threadRuntime(threadId);
+  if (!runtime) return false;
+  const needsCurrent = runtime.currentContextTokens < 0 || runtime.currentContextWindow <= 0;
+  const needsSessionTotal = runtime.sessionTotalTokens < 0;
+  if (!needsCurrent && !needsSessionTotal) return false;
+
+  const manager = conversationManager();
+  if (!manager || typeof manager.getConversation !== 'function') return false;
+  try {
+    const conversation = manager.getConversation(threadId);
+    const snapshot = conversation && first(conversation, ['latestTokenUsageInfo', 'latest_token_usage_info']);
+    return hydrateCurrentUsageFromSnapshot(runtime, snapshot);
+  } catch (_) {
+    return false;
+  }
+}
+
+function handleTokenUsage(params) {
     const threadId = stringValue(first(params, ['threadId', 'thread_id']));
     if (!threadId) return;
     const parsed = normalizeTokenUsage(params);
     if (!parsed) return;
     const runtime = threadRuntime(threadId);
-    if (parsed.lastTotal !== null && parsed.lastTotal >= 0) runtime.currentContextTokens = parsed.lastTotal;
-    if (parsed.windowSize !== null && parsed.windowSize > 0) runtime.currentContextWindow = parsed.windowSize;
-    runtime.currentContextPercent = ratioPercent(runtime.currentContextTokens, runtime.currentContextWindow) ?? -1;
-    if (parsed.sessionTotal !== null && parsed.sessionTotal >= 0) runtime.sessionTotalTokens = parsed.sessionTotal;
+    applyUsageTelemetry(runtime, parsed, false);
 
     if (runtime.postStatus === 'measuring' && eventSequence > runtime.measurementArmedSeq &&
       parsed.measured && parsed.lastTotal !== null && parsed.lastTotal > 0 && parsed.windowSize !== null && parsed.windowSize > 0) {
@@ -920,6 +968,7 @@
   function updateRiskTooltip() {
     const tooltip = ensureRiskTooltip();
     const runtime = threadRuntime(activeThreadId);
+    if (runtime) hydrateCurrentUsageFromConversation(activeThreadId);
     const risk = effectiveRisk(runtime);
     const post = tooltip.querySelector('[data-r-post]');
     const captured = tooltip.querySelector('[data-r-captured]');
@@ -1142,6 +1191,8 @@
     }),
     test: TEST_MODE ? {
       normalizeTokenUsage,
+      applyUsageTelemetry,
+      hydrateCurrentUsageFromSnapshot,
       usageBreakdownMeasured,
       normalizeRateLimitSnapshot,
       mergeRateLimitSnapshot,

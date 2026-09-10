@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Hydrate missing `Current context` and `Session tokens` from Codex Desktop's already-loaded `latestTokenUsageInfo` when the injected HUD misses the startup/thread-reentry token-usage replay; live token-usage events remain authoritative and existing persisted HUD state is unchanged.
+
 ## 0.1.3 - 2026-09-10
 
 - Preserve valid post-compaction snapshots while thread history is revalidated after thread switches, renderer reloads, or Codex restarts; transient `Syncing` state no longer causes a matching captured snapshot to be discarded as `Not captured`.
