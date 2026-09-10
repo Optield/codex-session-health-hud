@@ -21,8 +21,10 @@ jobs:
       - name: Verify Session tokens are gone from product code and READMEs
         shell: pwsh
         run: |
-          if (rg -n 'sessionTotalTokens|sessionTotal|data-r-total|Session tokens' RendererHudScript.js tests/renderer-logic.test.js) { exit 1 }
-          if (rg -n -i 'Session tokens|cumulative session tokens|total\.totalTokens|세션 누적 토큰|누적 token 사용량|cumulative token/session' README.md README.ko.md) { exit 1 }
+          $codeMatches = Select-String -Path 'RendererHudScript.js','tests/renderer-logic.test.js' -Pattern 'sessionTotalTokens|sessionTotal|data-r-total|Session tokens'
+          if ($codeMatches) { $codeMatches | ForEach-Object { Write-Host $_ }; exit 1 }
+          $readmeMatches = Select-String -Path 'README.md','README.ko.md' -Pattern 'Session tokens|cumulative session tokens|total\.totalTokens|세션 누적 토큰|누적 token 사용량|cumulative token/session'
+          if ($readmeMatches) { $readmeMatches | ForEach-Object { Write-Host $_ }; exit 1 }
 
       - name: Check renderer syntax
         shell: pwsh
