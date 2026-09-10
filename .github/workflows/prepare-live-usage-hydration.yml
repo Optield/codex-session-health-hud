@@ -9,12 +9,12 @@ permissions:
   contents: write
 
 jobs:
-  patch-and-test:
+  format-and-test:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Apply renderer hydration fix and regression tests
+      - name: Normalize renderer helper formatting
         shell: pwsh
         run: |
           @'
@@ -23,222 +23,94 @@ jobs:
 
           renderer = Path('RendererHudScript.js')
           text = renderer.read_text(encoding='utf-8')
-
-          refresh_pattern = re.compile(
-              r"  function refreshActiveThread\(\) \{\n"
-              r"\s+if \(disposed \|\| document\.hidden\) return;\n"
-              r"\s+setActiveThread\(resolveActiveThread\(\)\);\n"
-              r"\s+\}"
-          )
-          refresh_replacement = (
-              "  function refreshActiveThread() {\n"
-              "    if (disposed || document.hidden) return;\n"
-              "    const threadId = resolveActiveThread();\n"
-              "    setActiveThread(threadId);\n"
-              "    if (threadId && hydrateCurrentUsageFromConversation(threadId)) renderRisk();\n"
-              "  }"
-          )
-          text, count = refresh_pattern.subn(refresh_replacement, text, count=1)
-          if count != 1:
-              raise SystemExit(f'expected one refreshActiveThread block, replaced {count}')
-
-          normalize_pattern = re.compile(
-              r"  function normalizeTokenUsage\(params\) \{\n.*?\n  \}\n\n"
-              r"  function handleTokenUsage\(params\) \{",
+          pattern = re.compile(
+              r"  function normalizeTokenUsage\(params\) \{\n.*?\n  function normalizeRateLimitSnapshot\(value\) \{",
               re.S,
           )
-          normalize_replacement = """  function normalizeTokenUsage(params) {
-            const usage = first(params, ['tokenUsage', 'token_usage']) || params;
-            if (!usage || typeof usage !== 'object') return null;
-            const last = first(usage, ['last', 'lastTokenUsage', 'last_token_usage']);
-            const total = first(usage, ['total', 'totalTokenUsage', 'total_token_usage']);
-            const windowSize = number(first(usage, ['modelContextWindow', 'model_context_window', 'contextWindow', 'context_window']));
-            if (!last || typeof last !== 'object') return null;
-            const lastTotal = number(first(last, ['totalTokens', 'total_tokens']));
-            const sessionTotal = total && typeof total === 'object' ? number(first(total, ['totalTokens', 'total_tokens'])) : null;
-            return { last, lastTotal, sessionTotal, windowSize, measured: usageBreakdownMeasured(last) };
-          }
-
-          function applyUsageTelemetry(runtime, parsed, onlyMissing = false) {
-            if (!runtime || !parsed) return false;
-            let changed = false;
-            if (parsed.lastTotal !== null && parsed.lastTotal >= 0 &&
-              (!onlyMissing || runtime.currentContextTokens < 0)) {
-              changed = changed || runtime.currentContextTokens !== parsed.lastTotal;
-              runtime.currentContextTokens = parsed.lastTotal;
-            }
-            if (parsed.windowSize !== null && parsed.windowSize > 0 &&
-              (!onlyMissing || runtime.currentContextWindow <= 0)) {
-              changed = changed || runtime.currentContextWindow !== parsed.windowSize;
-              runtime.currentContextWindow = parsed.windowSize;
-            }
-            if (parsed.sessionTotal !== null && parsed.sessionTotal >= 0 &&
-              (!onlyMissing || runtime.sessionTotalTokens < 0)) {
-              changed = changed || runtime.sessionTotalTokens !== parsed.sessionTotal;
-              runtime.sessionTotalTokens = parsed.sessionTotal;
-            }
-            const percent = ratioPercent(runtime.currentContextTokens, runtime.currentContextWindow) ?? -1;
-            if (runtime.currentContextPercent !== percent) {
-              runtime.currentContextPercent = percent;
-              changed = true;
-            }
-            return changed;
-          }
-
-          function hydrateCurrentUsageFromSnapshot(runtime, snapshot) {
-            const parsed = normalizeTokenUsage(snapshot);
-            return parsed ? applyUsageTelemetry(runtime, parsed, true) : false;
-          }
-
-          function hydrateCurrentUsageFromConversation(threadId) {
-            const runtime = threadRuntime(threadId);
-            if (!runtime) return false;
-            const needsCurrent = runtime.currentContextTokens < 0 || runtime.currentContextWindow <= 0;
-            const needsSessionTotal = runtime.sessionTotalTokens < 0;
-            if (!needsCurrent && !needsSessionTotal) return false;
-
-            const manager = conversationManager();
-            if (!manager || typeof manager.getConversation !== 'function') return false;
-            try {
-              const conversation = manager.getConversation(threadId);
-              const snapshot = conversation && first(conversation, ['latestTokenUsageInfo', 'latest_token_usage_info']);
-              return hydrateCurrentUsageFromSnapshot(runtime, snapshot);
-            } catch (_) {
-              return false;
-            }
-          }
-
-          function handleTokenUsage(params) {"""
-          text, count = normalize_pattern.subn(normalize_replacement, text, count=1)
-          if count != 1:
-              raise SystemExit(f'expected one normalizeTokenUsage/handleTokenUsage boundary, replaced {count}')
-
-          assign_pattern = re.compile(
-              r"    const runtime = threadRuntime\(threadId\);\n"
-              r"\s+if \(parsed\.lastTotal !== null && parsed\.lastTotal >= 0\) runtime\.currentContextTokens = parsed\.lastTotal;\n"
-              r"\s+if \(parsed\.windowSize !== null && parsed\.windowSize > 0\) runtime\.currentContextWindow = parsed\.windowSize;\n"
-              r"\s+runtime\.currentContextPercent = ratioPercent\(runtime\.currentContextTokens, runtime\.currentContextWindow\) \?\? -1;\n"
-              r"\s+if \(parsed\.sessionTotal !== null && parsed\.sessionTotal >= 0\) runtime\.sessionTotalTokens = parsed\.sessionTotal;"
-          )
-          assign_replacement = (
+          replacement = (
+              "  function normalizeTokenUsage(params) {\n"
+              "    const usage = first(params, ['tokenUsage', 'token_usage']) || params;\n"
+              "    if (!usage || typeof usage !== 'object') return null;\n"
+              "    const last = first(usage, ['last', 'lastTokenUsage', 'last_token_usage']);\n"
+              "    const total = first(usage, ['total', 'totalTokenUsage', 'total_token_usage']);\n"
+              "    const windowSize = number(first(usage, ['modelContextWindow', 'model_context_window', 'contextWindow', 'context_window']));\n"
+              "    if (!last || typeof last !== 'object') return null;\n"
+              "    const lastTotal = number(first(last, ['totalTokens', 'total_tokens']));\n"
+              "    const sessionTotal = total && typeof total === 'object' ? number(first(total, ['totalTokens', 'total_tokens'])) : null;\n"
+              "    return { last, lastTotal, sessionTotal, windowSize, measured: usageBreakdownMeasured(last) };\n"
+              "  }\n\n"
+              "  function applyUsageTelemetry(runtime, parsed, onlyMissing = false) {\n"
+              "    if (!runtime || !parsed) return false;\n"
+              "    let changed = false;\n"
+              "    if (parsed.lastTotal !== null && parsed.lastTotal >= 0 &&\n"
+              "      (!onlyMissing || runtime.currentContextTokens < 0)) {\n"
+              "      changed = changed || runtime.currentContextTokens !== parsed.lastTotal;\n"
+              "      runtime.currentContextTokens = parsed.lastTotal;\n"
+              "    }\n"
+              "    if (parsed.windowSize !== null && parsed.windowSize > 0 &&\n"
+              "      (!onlyMissing || runtime.currentContextWindow <= 0)) {\n"
+              "      changed = changed || runtime.currentContextWindow !== parsed.windowSize;\n"
+              "      runtime.currentContextWindow = parsed.windowSize;\n"
+              "    }\n"
+              "    if (parsed.sessionTotal !== null && parsed.sessionTotal >= 0 &&\n"
+              "      (!onlyMissing || runtime.sessionTotalTokens < 0)) {\n"
+              "      changed = changed || runtime.sessionTotalTokens !== parsed.sessionTotal;\n"
+              "      runtime.sessionTotalTokens = parsed.sessionTotal;\n"
+              "    }\n"
+              "    const percent = ratioPercent(runtime.currentContextTokens, runtime.currentContextWindow) ?? -1;\n"
+              "    if (runtime.currentContextPercent !== percent) {\n"
+              "      runtime.currentContextPercent = percent;\n"
+              "      changed = true;\n"
+              "    }\n"
+              "    return changed;\n"
+              "  }\n\n"
+              "  function hydrateCurrentUsageFromSnapshot(runtime, snapshot) {\n"
+              "    const parsed = normalizeTokenUsage(snapshot);\n"
+              "    return parsed ? applyUsageTelemetry(runtime, parsed, true) : false;\n"
+              "  }\n\n"
+              "  function hydrateCurrentUsageFromConversation(threadId) {\n"
               "    const runtime = threadRuntime(threadId);\n"
-              "    applyUsageTelemetry(runtime, parsed, false);"
+              "    if (!runtime) return false;\n"
+              "    const needsCurrent = runtime.currentContextTokens < 0 || runtime.currentContextWindow <= 0;\n"
+              "    const needsSessionTotal = runtime.sessionTotalTokens < 0;\n"
+              "    if (!needsCurrent && !needsSessionTotal) return false;\n\n"
+              "    const manager = conversationManager();\n"
+              "    if (!manager || typeof manager.getConversation !== 'function') return false;\n"
+              "    try {\n"
+              "      const conversation = manager.getConversation(threadId);\n"
+              "      const snapshot = conversation && first(conversation, ['latestTokenUsageInfo', 'latest_token_usage_info']);\n"
+              "      return hydrateCurrentUsageFromSnapshot(runtime, snapshot);\n"
+              "    } catch (_) {\n"
+              "      return false;\n"
+              "    }\n"
+              "  }\n\n"
+              "  function handleTokenUsage(params) {\n"
+              "    const threadId = stringValue(first(params, ['threadId', 'thread_id']));\n"
+              "    if (!threadId) return;\n"
+              "    const parsed = normalizeTokenUsage(params);\n"
+              "    if (!parsed) return;\n"
+              "    const runtime = threadRuntime(threadId);\n"
+              "    applyUsageTelemetry(runtime, parsed, false);\n\n"
+              "    if (runtime.postStatus === 'measuring' && eventSequence > runtime.measurementArmedSeq &&\n"
+              "      parsed.measured && parsed.lastTotal !== null && parsed.lastTotal > 0 && parsed.windowSize !== null && parsed.windowSize > 0) {\n"
+              "      runtime.postStatus = 'ready';\n"
+              "      runtime.postTokens = parsed.lastTotal;\n"
+              "      runtime.postWindow = parsed.windowSize;\n"
+              "      runtime.captureRunId = '';\n"
+              "      runtime.capturedAt = new Date().toISOString();\n"
+              "      persistThread(runtime);\n"
+              "    }\n\n"
+              "    if (runtime.historyDirty) scheduleCompactionSync(threadId, 180);\n"
+              "    if (threadId === activeThreadId) renderRisk();\n"
+              "  }\n\n"
+              "  function normalizeRateLimitSnapshot(value) {"
           )
-          text, count = assign_pattern.subn(assign_replacement, text, count=1)
+          text, count = pattern.subn(replacement, text, count=1)
           if count != 1:
-              raise SystemExit(f'expected one live usage assignment block, replaced {count}')
-
-          tooltip_pattern = re.compile(
-              r"    const tooltip = ensureRiskTooltip\(\);\n"
-              r"\s+const runtime = threadRuntime\(activeThreadId\);\n"
-              r"\s+const risk = effectiveRisk\(runtime\);"
-          )
-          tooltip_replacement = (
-              "    const tooltip = ensureRiskTooltip();\n"
-              "    const runtime = threadRuntime(activeThreadId);\n"
-              "    if (runtime) hydrateCurrentUsageFromConversation(activeThreadId);\n"
-              "    const risk = effectiveRisk(runtime);"
-          )
-          text, count = tooltip_pattern.subn(tooltip_replacement, text, count=1)
-          if count != 1:
-              raise SystemExit(f'expected one risk tooltip bootstrap block, replaced {count}')
-
-          hook_pattern = re.compile(
-              r"      normalizeTokenUsage,\n\s+usageBreakdownMeasured,"
-          )
-          hook_replacement = (
-              "      normalizeTokenUsage,\n"
-              "      applyUsageTelemetry,\n"
-              "      hydrateCurrentUsageFromSnapshot,\n"
-              "      usageBreakdownMeasured,"
-          )
-          text, count = hook_pattern.subn(hook_replacement, text, count=1)
-          if count != 1:
-              raise SystemExit(f'expected one test hook block, replaced {count}')
+              raise SystemExit(f'expected one usage helper region, replaced {count}')
           renderer.write_text(text, encoding='utf-8')
-
-          tests = Path('tests/renderer-logic.test.js')
-          test_text = tests.read_text(encoding='utf-8')
-          marker = "assert.equal(localEstimate.measured, false, 'all-zero local re-estimate is rejected for post-compaction capture');\n\n"
-          addition = marker + """const rendererSnapshot = {
-            last: {
-              totalTokens: 132304,
-              inputTokens: 131989,
-              cachedInputTokens: 130944,
-              cacheWriteInputTokens: 0,
-              outputTokens: 315,
-              reasoningOutputTokens: 173
-            },
-            total: { totalTokens: 32145397 },
-            modelContextWindow: 258400
-          };
-          const missingLiveUsage = {
-            currentContextTokens: -1,
-            currentContextWindow: -1,
-            currentContextPercent: -1,
-            sessionTotalTokens: -1,
-            postStatus: 'ready',
-            postTokens: 34002,
-            postWindow: 258400
-          };
-          assert.equal(t.hydrateCurrentUsageFromSnapshot(missingLiveUsage, rendererSnapshot), true,
-            'renderer snapshot hydrates usage missed during startup replay');
-          assert.equal(missingLiveUsage.currentContextTokens, 132304);
-          assert.equal(missingLiveUsage.currentContextWindow, 258400);
-          assert.equal(missingLiveUsage.sessionTotalTokens, 32145397);
-          assert.equal(missingLiveUsage.currentContextPercent, 132304 * 100 / 258400);
-          assert.equal(missingLiveUsage.postStatus, 'ready', 'usage hydration does not change post-compaction state');
-          assert.equal(missingLiveUsage.postTokens, 34002, 'usage hydration does not replace post-compaction tokens');
-
-          const newerLiveUsage = {
-            currentContextTokens: 150000,
-            currentContextWindow: 258400,
-            currentContextPercent: 150000 * 100 / 258400,
-            sessionTotalTokens: 33000000
-          };
-          assert.equal(t.hydrateCurrentUsageFromSnapshot(newerLiveUsage, rendererSnapshot), false,
-            'renderer fallback never overwrites already observed live telemetry');
-          assert.equal(newerLiveUsage.currentContextTokens, 150000);
-          assert.equal(newerLiveUsage.sessionTotalTokens, 33000000);
-
-          const partialLiveUsage = {
-            currentContextTokens: 150000,
-            currentContextWindow: 258400,
-            currentContextPercent: 150000 * 100 / 258400,
-            sessionTotalTokens: -1
-          };
-          assert.equal(t.hydrateCurrentUsageFromSnapshot(partialLiveUsage, rendererSnapshot), true,
-            'renderer fallback can fill a missing session total without replacing current context');
-          assert.equal(partialLiveUsage.currentContextTokens, 150000);
-          assert.equal(partialLiveUsage.sessionTotalTokens, 32145397);
-
-          const liveUpdate = t.normalizeTokenUsage({ tokenUsage: {
-            last: { totalTokens: 160000, inputTokens: 159000, cachedInputTokens: 120000, outputTokens: 1000 },
-            total: { totalTokens: 34000000 },
-            modelContextWindow: 258400
-          }});
-          assert.equal(t.applyUsageTelemetry(partialLiveUsage, liveUpdate, false), true,
-            'live telemetry remains authoritative after renderer hydration');
-          assert.equal(partialLiveUsage.currentContextTokens, 160000);
-          assert.equal(partialLiveUsage.sessionTotalTokens, 34000000);
-
-          """
-          if test_text.count(marker) != 1:
-              raise SystemExit(f'expected one renderer test insertion point, found {test_text.count(marker)}')
-          test_text = test_text.replace(marker, addition, 1)
-          tests.write_text(test_text, encoding='utf-8')
-
-          changelog = Path('CHANGELOG.md')
-          change_text = changelog.read_text(encoding='utf-8')
-          heading = "# Changelog\n\n"
-          entry = "# Changelog\n\n## Unreleased\n\n- Hydrate missing `Current context` and `Session tokens` from Codex Desktop's already-loaded `latestTokenUsageInfo` when the injected HUD misses the startup/thread-reentry token-usage replay; live token-usage events remain authoritative and existing persisted HUD state is unchanged.\n\n"
-          if not change_text.startswith(heading):
-              raise SystemExit('unexpected changelog header')
-          if '## Unreleased' not in change_text:
-              change_text = entry + change_text[len(heading):]
-          changelog.write_text(change_text, encoding='utf-8')
-          '@ | Set-Content -LiteralPath "$env:RUNNER_TEMP\patch.py" -Encoding utf8
-          python "$env:RUNNER_TEMP\patch.py"
+          '@ | Set-Content -LiteralPath "$env:RUNNER_TEMP\format.py" -Encoding utf8
+          python "$env:RUNNER_TEMP\format.py"
 
       - name: Check renderer syntax
         shell: pwsh
@@ -264,13 +136,13 @@ jobs:
         shell: pwsh
         run: |
           git diff --check
-          git diff -- RendererHudScript.js tests/renderer-logic.test.js CHANGELOG.md
+          git diff -- RendererHudScript.js
 
-      - name: Commit fix
+      - name: Commit formatting
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add RendererHudScript.js tests/renderer-logic.test.js CHANGELOG.md
-          git commit -m "Hydrate missed live usage from renderer state"
+          git add RendererHudScript.js
+          git commit -m "Normalize live usage hydration formatting"
           git push
