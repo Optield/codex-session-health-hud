@@ -1,0 +1,68 @@
+name: execute session token removal
+
+on:
+  push:
+    paths:
+      - .github/workflows/execute-session-token-removal.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract and run embedded removal patch
+        shell: pwsh
+        run: |
+          $workflow = Get-Content -LiteralPath '.github/workflows/remove-session-tokens.yml' -Raw
+          $match = [regex]::Match($workflow, '(?ms)PATCH_B64: \|\r?\n(?<body>(?: {12}[A-Za-z0-9+/=]+\r?\n?)+)')
+          if (-not $match.Success) { throw 'Could not locate embedded removal patch.' }
+          $encoded = (($match.Groups['body'].Value -split '\r?\n') | ForEach-Object { $_.Trim() }) -join ''
+          $bytes = [Convert]::FromBase64String($encoded)
+          $patch = Join-Path $env:RUNNER_TEMP 'remove-session-tokens.py'
+          [IO.File]::WriteAllBytes($patch, $bytes)
+          python $patch
+
+      - name: Verify Session tokens are gone from product code and READMEs
+        shell: pwsh
+        run: |
+          if (rg -n 'sessionTotalTokens|sessionTotal|data-r-total|Session tokens' RendererHudScript.js tests/renderer-logic.test.js) { exit 1 }
+          if (rg -n -i 'Session tokens|cumulative session tokens|total\.totalTokens|세션 누적 토큰|누적 token 사용량|cumulative token/session' README.md README.ko.md) { exit 1 }
+
+      - name: Check renderer syntax
+        shell: pwsh
+        run: node --check .\RendererHudScript.js
+
+      - name: Test renderer logic
+        shell: pwsh
+        run: node .\tests\renderer-logic.test.js
+
+      - name: Build and run self-tests
+        shell: pwsh
+        run: .\Build.ps1
+
+      - name: Create Windows package
+        shell: pwsh
+        run: .\Package.ps1 -OutputDir .\dist
+
+      - name: Test Windows package
+        shell: pwsh
+        run: .\tests\package-layout.test.ps1 -PackagePath .\dist\CodexSessionHealthHUD-win-x64.zip
+
+      - name: Verify diff
+        shell: pwsh
+        run: |
+          git diff --check
+          git diff -- RendererHudScript.js tests/renderer-logic.test.js README.md README.ko.md CHANGELOG.md
+
+      - name: Commit removal
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add RendererHudScript.js tests/renderer-logic.test.js README.md README.ko.md CHANGELOG.md
+          git commit -m "Remove session token telemetry"
+          git push
