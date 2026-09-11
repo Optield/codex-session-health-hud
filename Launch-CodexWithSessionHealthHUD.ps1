@@ -49,7 +49,8 @@ function Get-CodexAppUserModelId {
 
 function Get-CodexPackageRoot {
     param([Parameter(Mandatory)] $Package)
-    return ([IO.Path]::GetFullPath($Package.InstallLocation).TrimEnd('\\') + '\\')
+    return [IO.Path]::GetFullPath($Package.InstallLocation).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
 }
 
 function Test-IsCodexProcess {
@@ -57,7 +58,10 @@ function Test-IsCodexProcess {
     if (-not $Process -or [string]::IsNullOrWhiteSpace([string]$Process.ExecutablePath)) { return $false }
     try {
         $path = [IO.Path]::GetFullPath([string]$Process.ExecutablePath)
-        return $path.StartsWith($PackageRoot, [StringComparison]::OrdinalIgnoreCase)
+        $prefix = $PackageRoot.TrimEnd(
+            [IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) +
+            [IO.Path]::DirectorySeparatorChar
+        return $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
     } catch {
         return $false
     }

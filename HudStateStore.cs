@@ -312,21 +312,27 @@ namespace CodexSessionHealthHUD
         private bool TrimToLimits(string protectedThreadId)
         {
             bool changed = false;
-            List<KeyValuePair<string, HudThreadState>> candidates = EvictionCandidates(protectedThreadId);
+            List<KeyValuePair<string, HudThreadState>> candidates = null;
             int index = 0;
 
             int excessEntries = Math.Max(0, state.threads.Count - maximumThreadEntries);
-            while (excessEntries > 0 && index < candidates.Count)
+            if (excessEntries > 0)
             {
-                if (state.threads.Remove(candidates[index++].Key))
+                candidates = EvictionCandidates(protectedThreadId);
+                while (excessEntries > 0 && index < candidates.Count)
                 {
-                    excessEntries -= 1;
-                    changed = true;
+                    if (state.threads.Remove(candidates[index++].Key))
+                    {
+                        excessEntries -= 1;
+                        changed = true;
+                    }
                 }
             }
 
             long bytes = Encoding.UTF8.GetByteCount(serializer.Serialize(state));
-            while (bytes > maximumStateFileBytes && index < candidates.Count)
+            if (bytes > maximumStateFileBytes && candidates == null)
+                candidates = EvictionCandidates(protectedThreadId);
+            while (bytes > maximumStateFileBytes && candidates != null && index < candidates.Count)
             {
                 long average = Math.Max(1L, bytes / Math.Max(1, state.threads.Count));
                 int removeCount = (int)Math.Max(1L,

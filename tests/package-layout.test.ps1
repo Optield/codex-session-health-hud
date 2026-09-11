@@ -63,6 +63,9 @@ try {
         $launcher.IndexOf('Test-IsCodexProcess', [StringComparison]::Ordinal) -lt 0) {
         throw 'Launcher no longer validates the Codex-owned DevTools listener process.'
     }
+    if ($launcher.IndexOf('DirectorySeparatorChar', [StringComparison]::Ordinal) -lt 0) {
+        throw 'Launcher no longer uses a path-boundary-safe Codex package containment check.'
+    }
 
     $installer = Get-Content -LiteralPath (Join-Path $stage 'Install.ps1') -Raw
     if ($installer -notmatch '\$shortcut\.Arguments\s*=.*-InstallDir') {
