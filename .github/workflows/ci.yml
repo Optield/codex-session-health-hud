@@ -22,6 +22,14 @@ jobs:
         shell: pwsh
         run: .\Build.ps1
 
+      - name: Test host lifecycle
+        shell: pwsh
+        run: .\tests\host-lifecycle.test.ps1
+
+      - name: Test install safety
+        shell: pwsh
+        run: .\tests\install-safety.test.ps1
+
       - name: Create Windows package
         shell: pwsh
         run: .\Package.ps1 -OutputDir .\dist
