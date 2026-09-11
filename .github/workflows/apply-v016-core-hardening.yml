@@ -1,0 +1,63 @@
+name: apply v0.1.6 core hardening
+
+on:
+  push:
+    paths:
+      - .github/workflows/apply-v016-core-hardening.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply core hardening patch
+        shell: pwsh
+        run: python .\scripts\apply-v016-core-hardening.py
+
+      - name: Check renderer syntax
+        shell: pwsh
+        run: node --check .\RendererHudScript.js
+
+      - name: Test renderer logic
+        shell: pwsh
+        run: node .\tests\renderer-logic.test.js
+
+      - name: Build and run self-tests
+        shell: pwsh
+        run: .\Build.ps1
+
+      - name: Test host lifecycle
+        shell: pwsh
+        run: .\tests\host-lifecycle.test.ps1
+
+      - name: Test install safety
+        shell: pwsh
+        run: .\tests\install-safety.test.ps1
+
+      - name: Create Windows package
+        shell: pwsh
+        run: .\Package.ps1 -OutputDir .\dist
+
+      - name: Test Windows package
+        shell: pwsh
+        run: .\tests\package-layout.test.ps1 -PackagePath .\dist\CodexSessionHealthHUD-win-x64.zip
+
+      - name: Verify diff
+        shell: pwsh
+        run: |
+          git diff --check
+          git status --short
+          git diff -- CodexSessionHealthHUD.cs RendererHudBridge.cs HudStateStore.cs Launch-CodexWithSessionHealthHUD.ps1 Install.ps1 Uninstall.ps1 tests .github/workflows/ci.yml
+
+      - name: Commit core hardening
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CodexSessionHealthHUD.cs RendererHudBridge.cs HudStateStore.cs Launch-CodexWithSessionHealthHUD.ps1 Install.ps1 Uninstall.ps1 tests .github/workflows/ci.yml
+          git commit -m "Harden host lifecycle and install safety"
+          git push
