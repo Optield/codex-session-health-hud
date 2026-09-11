@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.6 - 2026-09-12
+
+- Bind each HUD host run to the Codex browser process that owns the local DevTools listener, so `CodexSessionHealthHUD.exe` exits instead of surviving into a later Codex run. Missing endpoints, permanently missing main renderer targets, and repeated attach failures now have bounded grace periods while normal connected operation remains event-driven.
+- Validate the DevTools listener owner against the installed `OpenAI.Codex` package and distinguish the Electron browser process from renderer/utility helpers before attaching or deciding that Codex is already running.
+- Treat JavaScript exceptions returned through CDP `Runtime.evaluate` as failed injection, restrict navigation reinjection to top-level frames, and keep low-frequency reinjection retries only while the renderer is actually unavailable.
+- Retry transient `thread/items/list` failures with bounded backoff without disabling the current API or hydrating the entire thread; legacy reconciliation now uses only already-loaded complete history with bounded traversal.
+- Replace the timing-based legacy compaction dedupe with bounded per-turn ordinal pairing, so primary and legacy compaction events can arrive in either order, including multiple compactions in one turn, without double-counting or discarding an already-captured snapshot.
+- Never synthesize a `Captured` timestamp for a snapshot whose measurement time is unknown; invalid persisted timestamps are sanitized instead.
+- Recover the initial account-rate-limit snapshot with capped backoff only while it is unavailable, pause that recovery while the renderer is hidden, and stop retrying immediately after a full quota snapshot is obtained.
+- Keep the bounded state store writable at its 10,000-thread / 4 MiB limits by evicting lower-value entries only when a hard limit is actually exceeded; ordinary persistence keeps the previous single-serialization event-driven path.
+- Reject non-empty unmarked custom install directories, and make uninstall remove only known HUD-owned files while preserving unrelated files, non-empty Start-menu folders, and the install marker when cleanup is incomplete.
+- Add permanent Windows regression coverage for host lifetime, endpoint/renderer transitions, state eviction, injection exceptions, install/uninstall safety, renderer recovery, history fallback, compaction dedupe, and package layout.
+
 ## 0.1.5 - 2026-09-10
 
 - Remove the `Session tokens` field and its cumulative-session telemetry path; the Risk tooltip now focuses on post-compaction context, current context, and compaction count.
