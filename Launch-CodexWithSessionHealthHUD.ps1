@@ -67,6 +67,13 @@ function Test-IsCodexProcess {
     }
 }
 
+function Test-IsCodexBrowserProcess {
+    param([Parameter(Mandatory)] $Process, [Parameter(Mandatory)] [string]$PackageRoot)
+    if (-not (Test-IsCodexProcess -Process $Process -PackageRoot $PackageRoot)) { return $false }
+    $commandLine = [string]$Process.CommandLine
+    return $commandLine -notmatch '(?:^|\s)--type(?:=|\s)'
+}
+
 function Get-ProcessByIdCim {
     param([uint32]$ProcessId)
     return Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue |
@@ -128,7 +135,7 @@ try {
     $listener = Get-DebugListener -LocalPort $Port
     if ($listener) {
         $owner = Get-ProcessByIdCim -ProcessId ([uint32]$listener.OwningProcess)
-        if (-not (Test-IsCodexProcess -Process $owner -PackageRoot $packageRoot)) {
+        if (-not (Test-IsCodexBrowserProcess -Process $owner -PackageRoot $packageRoot)) {
             throw "Local port $Port is already in use by a non-Codex process. Codex and the HUD were not started."
         }
         Start-Process -FilePath $hudExe -ArgumentList @('--renderer-attach', $Port, [int]$listener.OwningProcess) `
@@ -137,7 +144,7 @@ try {
     }
 
     $running = @(Get-CimInstance Win32_Process -Filter "Name='ChatGPT.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { Test-IsCodexProcess -Process $_ -PackageRoot $packageRoot })
+        Where-Object { Test-IsCodexBrowserProcess -Process $_ -PackageRoot $packageRoot })
     if ($running.Count -gt 0) {
         Show-HudMessage -Message (
             'Codex is already running without the local HUD debugging port.' + [Environment]::NewLine +
@@ -165,7 +172,7 @@ try {
     }
 
     $owner = Get-ProcessByIdCim -ProcessId ([uint32]$listener.OwningProcess)
-    if (-not (Test-IsCodexProcess -Process $owner -PackageRoot $packageRoot)) {
+    if (-not (Test-IsCodexBrowserProcess -Process $owner -PackageRoot $packageRoot)) {
         throw "Local port $Port became owned by a non-Codex process. The HUD was not attached."
     }
 

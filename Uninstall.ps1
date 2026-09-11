@@ -40,8 +40,12 @@ if (-not $NoShortcuts) {
             try { Remove-Item -LiteralPath $shortcutPath -Force } catch { }
         }
     }
-    if (Test-Path -LiteralPath $programsDir) {
-        try { Remove-Item -LiteralPath $programsDir -Recurse -Force } catch { }
+    if (Test-Path -LiteralPath $programsDir -PathType Container) {
+        try {
+            if (@(Get-ChildItem -LiteralPath $programsDir -Force).Count -eq 0) {
+                Remove-Item -LiteralPath $programsDir -Force
+            }
+        } catch { }
     }
 }
 
@@ -82,8 +86,18 @@ if (Test-Path -LiteralPath $assetsDir -PathType Container) {
     } catch { }
 }
 
-# Remove the ownership marker last. Never recursively delete InstallDir: a custom
-# install directory may contain unrelated user files from before this safeguard.
+# Remove the ownership marker last, and only after known HUD files are gone.
+# If cleanup was incomplete, keep the marker so uninstall can be retried safely.
+$remainingOwned = @()
+foreach ($relativePath in $ownedFiles) {
+    if (Test-Path -LiteralPath (Join-Path $fullInstallDir $relativePath) -PathType Leaf) {
+        $remainingOwned += $relativePath
+    }
+}
+if (Test-Path -LiteralPath $assetPath -PathType Leaf) { $remainingOwned += 'assets\hud-composer.svg' }
+if ($remainingOwned.Count -gt 0) {
+    throw ('Could not remove all HUD-owned files: ' + ($remainingOwned -join ', '))
+}
 if (Test-Path -LiteralPath $marker -PathType Leaf) {
     Remove-Item -LiteralPath $marker -Force
 }

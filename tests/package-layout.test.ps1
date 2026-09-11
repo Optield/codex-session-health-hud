@@ -66,6 +66,10 @@ try {
     if ($launcher.IndexOf('DirectorySeparatorChar', [StringComparison]::Ordinal) -lt 0) {
         throw 'Launcher no longer uses a path-boundary-safe Codex package containment check.'
     }
+    if ($launcher.IndexOf('Test-IsCodexBrowserProcess', [StringComparison]::Ordinal) -lt 0 -or
+        $launcher.IndexOf("--type", [StringComparison]::Ordinal) -lt 0) {
+        throw 'Launcher no longer distinguishes the Codex browser process from helper processes.'
+    }
 
     $installer = Get-Content -LiteralPath (Join-Path $stage 'Install.ps1') -Raw
     if ($installer -notmatch '\$shortcut\.Arguments\s*=.*-InstallDir') {
@@ -78,6 +82,12 @@ try {
     $uninstaller = Get-Content -LiteralPath (Join-Path $stage 'Uninstall.ps1') -Raw
     if ($uninstaller -match 'Remove-Item\s+-LiteralPath\s+\$fullInstallDir\s+-Recurse') {
         throw 'Uninstaller regressed to recursively deleting the entire install directory.'
+    }
+    if ($uninstaller -match 'Remove-Item\s+-LiteralPath\s+\$programsDir\s+-Recurse') {
+        throw 'Uninstaller regressed to recursively deleting the Start-menu folder.'
+    }
+    if ($uninstaller.IndexOf('remainingOwned', [StringComparison]::Ordinal) -lt 0) {
+        throw 'Uninstaller no longer preserves the marker when owned-file cleanup is incomplete.'
     }
     if ($uninstaller.IndexOf('unrelated files were not modified', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
         throw 'Uninstaller no longer documents preservation of unrelated files.'

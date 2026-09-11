@@ -131,6 +131,7 @@ assert.equal(t.isUnsupportedMethodError(new Error('request timed out while calli
   'transient errors that merely mention method do not disable the list API');
 assert.equal(t.historyRetryDelay(1), 300);
 assert.equal(t.historyRetryDelay(5), 15000);
+assert.equal(t.historyRetryDelay(6), 15000, 'history retry delay stays capped after the configured sequence');
 assert.equal(t.historyRetryDelay(99), 15000, 'history retry delay is capped');
 
 const loadedHistory = {

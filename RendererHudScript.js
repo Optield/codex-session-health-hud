@@ -338,7 +338,7 @@
     runtime.historyDirty = true;
     runtime.validatedThisRun = false;
     runtime.historyRetryAttempts += 1;
-    if (runtime.historyRetryAttempts < HISTORY_RETRY_DELAYS.length) {
+    if (runtime.historyRetryAttempts <= HISTORY_RETRY_DELAYS.length) {
       if (runtime.threadId === activeThreadId) runtime.postStatus = 'syncing';
       scheduleCompactionSync(runtime.threadId, historyRetryDelay(runtime.historyRetryAttempts));
     } else if (runtime.threadId === activeThreadId) {
@@ -809,7 +809,7 @@
         return;
       }
     } catch (_) { }
-    if (!hasFullQuotaSnapshot && !quotaRequestTimer && !disposed) {
+    if (!hasFullQuotaSnapshot && !quotaRequestTimer && !disposed && !document.hidden) {
       quotaRequestTimer = window.setTimeout(requestRateLimits, quotaRetryDelay(quotaRequestAttempts));
     }
   }
@@ -1286,6 +1286,12 @@
     if (!document.hidden) {
       scheduleMount(0);
       scheduleActiveThreadRefresh(0);
+      const runtime = threadRuntime(activeThreadId);
+      if (runtime && runtime.historyDirty && !runtime.syncInFlight && !runtime.syncTimer) {
+        runtime.historyRetryAttempts = 0;
+        runtime.postStatus = 'syncing';
+        scheduleCompactionSync(activeThreadId, 120);
+      }
       if (!hasFullQuotaSnapshot && !quotaRequestTimer) {
         quotaRequestTimer = window.setTimeout(requestRateLimits, 120);
       }
