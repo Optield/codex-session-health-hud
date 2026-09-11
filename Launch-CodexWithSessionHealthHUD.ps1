@@ -71,6 +71,7 @@ function Test-IsCodexBrowserProcess {
     param([Parameter(Mandatory)] $Process, [Parameter(Mandatory)] [string]$PackageRoot)
     if (-not (Test-IsCodexProcess -Process $Process -PackageRoot $PackageRoot)) { return $false }
     $commandLine = [string]$Process.CommandLine
+    if ([string]::IsNullOrWhiteSpace($commandLine)) { return $false }
     return $commandLine -notmatch '(?:^|\s)--type(?:=|\s)'
 }
 

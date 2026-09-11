@@ -84,11 +84,14 @@ namespace CodexSessionHealthHUD
             serializer.MaxJsonLength = 8 * 1024 * 1024;
             serializer.RecursionLimit = 64;
             state = Load();
-            bool changed = TrimToLimits(null);
+            bool changed = TrimEntryLimit(null);
+            long startupBytes = Encoding.UTF8.GetByteCount(serializer.Serialize(state));
+            if (startupBytes > maximumStateFileBytes && TrimBytesToLimit(null, startupBytes))
+                changed = true;
             if (InvalidateForeignPendingMeasurements())
                 changed = true;
             if (changed)
-                SaveLocked();
+                SaveLocked(null);
         }
 
         internal string GetBootstrapJson()
@@ -141,8 +144,8 @@ namespace CodexSessionHealthHUD
             lock (gate)
             {
                 state.threads[threadId] = next;
-                TrimToLimits(threadId);
-                SaveLocked();
+                TrimEntryLimit(threadId);
+                SaveLocked(threadId);
             }
         }
 
@@ -309,30 +312,34 @@ namespace CodexSessionHealthHUD
             return candidates;
         }
 
-        private bool TrimToLimits(string protectedThreadId)
+        private bool TrimEntryLimit(string protectedThreadId)
         {
-            bool changed = false;
-            List<KeyValuePair<string, HudThreadState>> candidates = null;
-            int index = 0;
-
             int excessEntries = Math.Max(0, state.threads.Count - maximumThreadEntries);
-            if (excessEntries > 0)
+            if (excessEntries <= 0)
+                return false;
+            bool changed = false;
+            List<KeyValuePair<string, HudThreadState>> candidates = EvictionCandidates(protectedThreadId);
+            int index = 0;
+            while (excessEntries > 0 && index < candidates.Count)
             {
-                candidates = EvictionCandidates(protectedThreadId);
-                while (excessEntries > 0 && index < candidates.Count)
+                if (state.threads.Remove(candidates[index++].Key))
                 {
-                    if (state.threads.Remove(candidates[index++].Key))
-                    {
-                        excessEntries -= 1;
-                        changed = true;
-                    }
+                    excessEntries -= 1;
+                    changed = true;
                 }
             }
+            return changed;
+        }
 
-            long bytes = Encoding.UTF8.GetByteCount(serializer.Serialize(state));
-            if (bytes > maximumStateFileBytes && candidates == null)
-                candidates = EvictionCandidates(protectedThreadId);
-            while (bytes > maximumStateFileBytes && candidates != null && index < candidates.Count)
+        private bool TrimBytesToLimit(string protectedThreadId, long currentBytes)
+        {
+            if (currentBytes <= maximumStateFileBytes)
+                return false;
+            bool changed = false;
+            long bytes = currentBytes;
+            List<KeyValuePair<string, HudThreadState>> candidates = EvictionCandidates(protectedThreadId);
+            int index = 0;
+            while (bytes > maximumStateFileBytes && index < candidates.Count)
             {
                 long average = Math.Max(1L, bytes / Math.Max(1, state.threads.Count));
                 int removeCount = (int)Math.Max(1L,
@@ -347,7 +354,7 @@ namespace CodexSessionHealthHUD
             return changed;
         }
 
-        private void SaveLocked()
+        private void SaveLocked(string protectedThreadId)
         {
             string directory = Path.GetDirectoryName(statePath);
             if (string.IsNullOrWhiteSpace(directory))
@@ -355,8 +362,14 @@ namespace CodexSessionHealthHUD
             Directory.CreateDirectory(directory);
 
             string json = serializer.Serialize(state);
-            if (Encoding.UTF8.GetByteCount(json) > maximumStateFileBytes)
-                return;
+            long bytes = Encoding.UTF8.GetByteCount(json);
+            if (bytes > maximumStateFileBytes)
+            {
+                TrimBytesToLimit(protectedThreadId, bytes);
+                json = serializer.Serialize(state);
+                if (Encoding.UTF8.GetByteCount(json) > maximumStateFileBytes)
+                    return;
+            }
 
             using (Mutex mutex = new Mutex(false, StateMutexName))
             {

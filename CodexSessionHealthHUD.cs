@@ -75,6 +75,11 @@ namespace CodexSessionHealthHUD
                     RendererHudHost.ShouldExitForLifetime(false, RendererHudHost.EndpointFailureExitThreshold - 1) ||
                     !RendererHudHost.ShouldExitForLifetime(false, RendererHudHost.EndpointFailureExitThreshold))
                     throw new InvalidOperationException("Host lifetime policy regression.");
+                if (RendererHudHost.ShouldExitForTargetState(RendererHudHost.TargetMissingExitThreshold - 1, 0) ||
+                    !RendererHudHost.ShouldExitForTargetState(RendererHudHost.TargetMissingExitThreshold, 0) ||
+                    RendererHudHost.ShouldExitForTargetState(0, RendererHudHost.AttachFailureExitThreshold - 1) ||
+                    !RendererHudHost.ShouldExitForTargetState(0, RendererHudHost.AttachFailureExitThreshold))
+                    throw new InvalidOperationException("Host target/attach lifetime policy regression.");
 
                 Dictionary<string, object> evaluationBody = new Dictionary<string, object>();
                 evaluationBody["exceptionDetails"] = new Dictionary<string, object>();

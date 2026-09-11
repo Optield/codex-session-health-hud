@@ -70,6 +70,9 @@ try {
         $launcher.IndexOf("--type", [StringComparison]::Ordinal) -lt 0) {
         throw 'Launcher no longer distinguishes the Codex browser process from helper processes.'
     }
+    if ($launcher.IndexOf('IsNullOrWhiteSpace($commandLine)', [StringComparison]::Ordinal) -lt 0) {
+        throw 'Launcher no longer fails closed when browser-process command-line identity is unavailable.'
+    }
 
     $installer = Get-Content -LiteralPath (Join-Path $stage 'Install.ps1') -Raw
     if ($installer -notmatch '\$shortcut\.Arguments\s*=.*-InstallDir') {

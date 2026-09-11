@@ -164,8 +164,12 @@ namespace CodexSessionHealthHUD
 
         internal void ConnectAndInject(CdpTarget target)
         {
-            socket.ConnectAsync(new Uri(target.WebSocketDebuggerUrl), CancellationToken.None)
-                .GetAwaiter().GetResult();
+            using (CancellationTokenSource connectTimeout = new CancellationTokenSource())
+            {
+                connectTimeout.CancelAfter(3000);
+                socket.ConnectAsync(new Uri(target.WebSocketDebuggerUrl), connectTimeout.Token)
+                    .GetAwaiter().GetResult();
+            }
             readerTask = Task.Run((Func<Task>)ReceiveLoopAsync);
 
             SendCommandAsync("Runtime.enable", null).GetAwaiter().GetResult();
@@ -443,10 +447,18 @@ namespace CodexSessionHealthHUD
     {
         private const int RetryDelayMilliseconds = 750;
         internal const int EndpointFailureExitThreshold = 8;
+        internal const int TargetMissingExitThreshold = 80;
+        internal const int AttachFailureExitThreshold = 20;
 
         internal static bool ShouldExitForLifetime(bool ownerExited, int consecutiveEndpointFailures)
         {
             return ownerExited || consecutiveEndpointFailures >= EndpointFailureExitThreshold;
+        }
+
+        internal static bool ShouldExitForTargetState(int consecutiveTargetMisses, int consecutiveAttachFailures)
+        {
+            return consecutiveTargetMisses >= TargetMissingExitThreshold ||
+                consecutiveAttachFailures >= AttachFailureExitThreshold;
         }
 
         private static bool OwnerExited(Process owner)
@@ -478,17 +490,22 @@ namespace CodexSessionHealthHUD
                     HudStateStore stateStore = new HudStateStore(runId);
                     string script = RendererHudScript.Load();
                     int consecutiveEndpointFailures = 0;
+                    int consecutiveTargetMisses = 0;
+                    int consecutiveAttachFailures = 0;
 
                     while (true)
                     {
                         bool ownerExited = OwnerExited(owner);
-                        if (ShouldExitForLifetime(ownerExited, consecutiveEndpointFailures))
+                        if (ShouldExitForLifetime(ownerExited, consecutiveEndpointFailures) ||
+                            ShouldExitForTargetState(consecutiveTargetMisses, consecutiveAttachFailures))
                             return 0;
 
                         CdpProbeResult probe = CdpTargetDiscovery.Probe(port);
                         if (!probe.EndpointReachable)
                         {
                             consecutiveEndpointFailures += 1;
+                            consecutiveTargetMisses = 0;
+                            consecutiveAttachFailures = 0;
                             if (ShouldExitForLifetime(OwnerExited(owner), consecutiveEndpointFailures))
                                 return 0;
                             Thread.Sleep(RetryDelayMilliseconds);
@@ -496,17 +513,31 @@ namespace CodexSessionHealthHUD
                         }
 
                         consecutiveEndpointFailures = 0;
-                        if (probe.Target != null)
+                        if (probe.Target == null)
                         {
-                            try
+                            consecutiveTargetMisses += 1;
+                            consecutiveAttachFailures = 0;
+                            if (ShouldExitForTargetState(consecutiveTargetMisses, consecutiveAttachFailures))
+                                return 0;
+                            Thread.Sleep(RetryDelayMilliseconds);
+                            continue;
+                        }
+
+                        consecutiveTargetMisses = 0;
+                        try
+                        {
+                            using (CdpConnection connection = new CdpConnection(stateStore, script))
                             {
-                                using (CdpConnection connection = new CdpConnection(stateStore, script))
-                                {
-                                    connection.ConnectAndInject(probe.Target);
-                                    connection.WaitUntilClosed();
-                                }
+                                connection.ConnectAndInject(probe.Target);
+                                consecutiveAttachFailures = 0;
+                                connection.WaitUntilClosed();
                             }
-                            catch { }
+                        }
+                        catch
+                        {
+                            consecutiveAttachFailures += 1;
+                            if (ShouldExitForTargetState(consecutiveTargetMisses, consecutiveAttachFailures))
+                                return 0;
                         }
                         Thread.Sleep(RetryDelayMilliseconds);
                     }
