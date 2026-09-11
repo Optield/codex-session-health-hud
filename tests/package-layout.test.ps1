@@ -59,10 +59,25 @@ try {
     if ($launcher -match '\[string\]\$InstallDir\s*=\s*\(\s*Join-Path\s+\$PSScriptRoot') {
         throw 'Launcher regressed to evaluating $PSScriptRoot in a parameter default.'
     }
+    if ($launcher.IndexOf('OwningProcess', [StringComparison]::Ordinal) -lt 0 -or
+        $launcher.IndexOf('Test-IsCodexProcess', [StringComparison]::Ordinal) -lt 0) {
+        throw 'Launcher no longer validates the Codex-owned DevTools listener process.'
+    }
 
     $installer = Get-Content -LiteralPath (Join-Path $stage 'Install.ps1') -Raw
     if ($installer -notmatch '\$shortcut\.Arguments\s*=.*-InstallDir') {
         throw 'Start menu shortcut does not pass InstallDir explicitly.'
+    }
+    if ($installer.IndexOf('InstallDir is not empty and is not a marked', [StringComparison]::Ordinal) -lt 0) {
+        throw 'Installer no longer rejects non-empty unowned custom install directories.'
+    }
+
+    $uninstaller = Get-Content -LiteralPath (Join-Path $stage 'Uninstall.ps1') -Raw
+    if ($uninstaller -match 'Remove-Item\s+-LiteralPath\s+\$fullInstallDir\s+-Recurse') {
+        throw 'Uninstaller regressed to recursively deleting the entire install directory.'
+    }
+    if ($uninstaller.IndexOf('unrelated files were not modified', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw 'Uninstaller no longer documents preservation of unrelated files.'
     }
 
     $readmeAsset = Get-Content -LiteralPath (Join-Path $stage 'assets\hud-composer.svg') -Raw

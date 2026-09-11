@@ -11,6 +11,20 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     throw 'InstallDir cannot be empty.'
 }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$marker = Join-Path $InstallDir '.install-marker'
+
+if (Test-Path -LiteralPath $InstallDir -PathType Container) {
+    $existingEntries = @(Get-ChildItem -LiteralPath $InstallDir -Force -ErrorAction Stop)
+    if ($existingEntries.Count -gt 0) {
+        if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
+            throw "InstallDir is not empty and is not a marked Codex Session Health HUD installation: $InstallDir"
+        }
+        $markerValue = (Get-Content -LiteralPath $marker -Raw).Trim()
+        if ($markerValue -ne 'CodexSessionHealthHUD|v1') {
+            throw 'InstallDir contains an unrecognized installation marker.'
+        }
+    }
+}
 
 $sourceExe = Join-Path $PSScriptRoot 'CodexSessionHealthHUD.exe'
 if (-not (Test-Path -LiteralPath $sourceExe)) {
@@ -23,7 +37,6 @@ $targetLauncher = Join-Path $InstallDir 'Launch-CodexWithSessionHealthHUD.ps1'
 $targetIcon = Join-Path $InstallDir 'Codex.ico'
 $sourceAssets = Join-Path $PSScriptRoot 'assets'
 $targetAssets = Join-Path $InstallDir 'assets'
-$marker = Join-Path $InstallDir '.install-marker'
 $programsDir = Join-Path ([Environment]::GetFolderPath('Programs')) 'Codex Session Health HUD'
 $launcherShortcut = Join-Path $programsDir 'Codex with Session Health HUD.lnk'
 $taskbarShortcut = Join-Path $env:APPDATA `

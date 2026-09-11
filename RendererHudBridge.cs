@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.WebSockets;
@@ -36,23 +37,40 @@ namespace CodexSessionHealthHUD
         internal string WebSocketDebuggerUrl;
     }
 
+    internal sealed class CdpProbeResult
+    {
+        internal bool EndpointReachable;
+        internal CdpTarget Target;
+    }
+
     internal static class CdpTargetDiscovery
     {
-        internal static CdpTarget Find(int port)
+        internal static CdpProbeResult Probe(int port)
         {
+            CdpProbeResult result = new CdpProbeResult();
             string endpoint = "http://127.0.0.1:" + port + "/json/list";
-            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(endpoint);
-            request.Timeout = 2000;
-            request.ReadWriteTimeout = 2000;
-            request.Proxy = null;
             string json;
-            using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
-            using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
-                json = reader.ReadToEnd();
+            try
+            {
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(endpoint);
+                request.Timeout = 1000;
+                request.ReadWriteTimeout = 1000;
+                request.Proxy = null;
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+                    json = reader.ReadToEnd();
+                result.EndpointReachable = true;
+            }
+            catch
+            {
+                return result;
+            }
 
-            object[] targets = new JavaScriptSerializer().DeserializeObject(json) as object[];
+            object[] targets;
+            try { targets = new JavaScriptSerializer().DeserializeObject(json) as object[]; }
+            catch { return result; }
             if (targets == null)
-                return null;
+                return result;
 
             CdpTarget fallback = null;
             for (int i = 0; i < targets.Length; i++)
@@ -67,11 +85,20 @@ namespace CodexSessionHealthHUD
                 if (!IsAllowedTarget(target) || !IsLoopbackWebSocket(target.WebSocketDebuggerUrl))
                     continue;
                 if (string.Equals(target.Url, "app://-/index.html", StringComparison.OrdinalIgnoreCase))
-                    return target;
+                {
+                    result.Target = target;
+                    return result;
+                }
                 if (fallback == null)
                     fallback = target;
             }
-            return fallback;
+            result.Target = fallback;
+            return result;
+        }
+
+        internal static CdpTarget Find(int port)
+        {
+            return Probe(port).Target;
         }
 
         private static bool IsAllowedTarget(CdpTarget target)
@@ -125,6 +152,7 @@ namespace CodexSessionHealthHUD
         private Task readerTask;
         private int reinjectScheduled;
         private volatile bool canReinject;
+        private volatile bool disposed;
 
         internal CdpConnection(HudStateStore stateStore, string rendererScript)
         {
@@ -174,13 +202,29 @@ namespace CodexSessionHealthHUD
             }
         }
 
-        private Task EvaluateAsync(string expression)
+        private async Task EvaluateAsync(string expression)
         {
             Dictionary<string, object> parameters = new Dictionary<string, object>();
             parameters["expression"] = expression;
             parameters["awaitPromise"] = false;
             parameters["returnByValue"] = true;
-            return SendCommandAsync("Runtime.evaluate", parameters);
+            IDictionary<string, object> response = await SendCommandAsync("Runtime.evaluate", parameters)
+                .ConfigureAwait(false);
+            if (HasEvaluationException(response))
+                throw new InvalidOperationException("Runtime.evaluate reported a JavaScript exception.");
+        }
+
+        internal static bool HasEvaluationException(IDictionary<string, object> response)
+        {
+            if (response == null)
+                return false;
+            object rawResult;
+            IDictionary<string, object> result;
+            if (!response.TryGetValue("result", out rawResult) ||
+                (result = rawResult as IDictionary<string, object>) == null)
+                return false;
+            object exceptionDetails;
+            return result.TryGetValue("exceptionDetails", out exceptionDetails) && exceptionDetails != null;
         }
 
         private async Task<IDictionary<string, object>> SendCommandAsync(string method, object parameters)
@@ -270,8 +314,9 @@ namespace CodexSessionHealthHUD
                     {
                         HandleBindingCalled(message);
                     }
-                    else if (string.Equals(method, "Page.frameNavigated", StringComparison.Ordinal) ||
-                        string.Equals(method, "Runtime.executionContextsCleared", StringComparison.Ordinal))
+                    else if (string.Equals(method, "Runtime.executionContextsCleared", StringComparison.Ordinal) ||
+                        (string.Equals(method, "Page.frameNavigated", StringComparison.Ordinal) &&
+                         IsTopLevelFrameNavigation(message)))
                     {
                         if (canReinject) ScheduleReinject();
                     }
@@ -312,29 +357,49 @@ namespace CodexSessionHealthHUD
             stateStore.ApplyRendererPayload(payload);
         }
 
+        private static bool IsTopLevelFrameNavigation(IDictionary<string, object> message)
+        {
+            object rawParams;
+            IDictionary<string, object> parameters;
+            object rawFrame;
+            IDictionary<string, object> frame;
+            if (message == null || !message.TryGetValue("params", out rawParams) ||
+                (parameters = rawParams as IDictionary<string, object>) == null ||
+                !parameters.TryGetValue("frame", out rawFrame) ||
+                (frame = rawFrame as IDictionary<string, object>) == null)
+                return false;
+            object parentId;
+            return !frame.TryGetValue("parentId", out parentId) || parentId == null ||
+                string.IsNullOrWhiteSpace(Convert.ToString(parentId));
+        }
+
         private void ScheduleReinject()
         {
-            if (Interlocked.Exchange(ref reinjectScheduled, 1) != 0)
+            if (!canReinject || disposed || Interlocked.Exchange(ref reinjectScheduled, 1) != 0)
                 return;
             Task.Run(async () =>
             {
+                int delay = 180;
                 try
                 {
-                    for (int attempt = 0; attempt < 5; attempt++)
+                    while (!disposed && !cancellation.IsCancellationRequested && socket.State == WebSocketState.Open)
                     {
                         try
                         {
-                            await Task.Delay(180 + attempt * 160).ConfigureAwait(false);
+                            await Task.Delay(delay, cancellation.Token).ConfigureAwait(false);
                             await InjectAsync().ConfigureAwait(false);
-                            break;
+                            return;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            return;
                         }
                         catch
                         {
-                            if (attempt == 4) throw;
+                            delay = Math.Min(5000, Math.Max(360, delay * 2));
                         }
                     }
                 }
-                catch { }
                 finally
                 {
                     Interlocked.Exchange(ref reinjectScheduled, 0);
@@ -364,6 +429,7 @@ namespace CodexSessionHealthHUD
 
         public void Dispose()
         {
+            disposed = true;
             try { cancellation.Cancel(); } catch { }
             try { socket.Abort(); } catch { }
             socket.Dispose();
@@ -376,35 +442,74 @@ namespace CodexSessionHealthHUD
     internal static class RendererHudHost
     {
         private const int RetryDelayMilliseconds = 750;
+        internal const int EndpointFailureExitThreshold = 8;
 
-        internal static int Run(int port)
+        internal static bool ShouldExitForLifetime(bool ownerExited, int consecutiveEndpointFailures)
         {
-            bool created;
-            using (Mutex mutex = new Mutex(true, "Local\\CodexSessionHealthHUD.Renderer." + port, out created))
+            return ownerExited || consecutiveEndpointFailures >= EndpointFailureExitThreshold;
+        }
+
+        private static bool OwnerExited(Process owner)
+        {
+            if (owner == null)
+                return true;
+            try { return owner.HasExited; }
+            catch { return true; }
+        }
+
+        internal static int Run(int port, int browserProcessId)
+        {
+            if (browserProcessId <= 0)
+                return 2;
+
+            Process owner;
+            try { owner = Process.GetProcessById(browserProcessId); }
+            catch { return 0; }
+
+            using (owner)
             {
-                if (!created)
-                    return 0;
-
-                string runId = Guid.NewGuid().ToString("N");
-                HudStateStore stateStore = new HudStateStore(runId);
-                string script = RendererHudScript.Load();
-
-                while (true)
+                bool created;
+                using (Mutex mutex = new Mutex(true, "Local\\CodexSessionHealthHUD.Renderer." + port, out created))
                 {
-                    try
+                    if (!created)
+                        return 0;
+
+                    string runId = Guid.NewGuid().ToString("N");
+                    HudStateStore stateStore = new HudStateStore(runId);
+                    string script = RendererHudScript.Load();
+                    int consecutiveEndpointFailures = 0;
+
+                    while (true)
                     {
-                        CdpTarget target = CdpTargetDiscovery.Find(port);
-                        if (target != null)
+                        bool ownerExited = OwnerExited(owner);
+                        if (ShouldExitForLifetime(ownerExited, consecutiveEndpointFailures))
+                            return 0;
+
+                        CdpProbeResult probe = CdpTargetDiscovery.Probe(port);
+                        if (!probe.EndpointReachable)
                         {
-                            using (CdpConnection connection = new CdpConnection(stateStore, script))
-                            {
-                                connection.ConnectAndInject(target);
-                                connection.WaitUntilClosed();
-                            }
+                            consecutiveEndpointFailures += 1;
+                            if (ShouldExitForLifetime(OwnerExited(owner), consecutiveEndpointFailures))
+                                return 0;
+                            Thread.Sleep(RetryDelayMilliseconds);
+                            continue;
                         }
+
+                        consecutiveEndpointFailures = 0;
+                        if (probe.Target != null)
+                        {
+                            try
+                            {
+                                using (CdpConnection connection = new CdpConnection(stateStore, script))
+                                {
+                                    connection.ConnectAndInject(probe.Target);
+                                    connection.WaitUntilClosed();
+                                }
+                            }
+                            catch { }
+                        }
+                        Thread.Sleep(RetryDelayMilliseconds);
                     }
-                    catch { }
-                    Thread.Sleep(RetryDelayMilliseconds);
                 }
             }
         }

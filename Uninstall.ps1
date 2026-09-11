@@ -1,10 +1,11 @@
 [CmdletBinding()]
 param(
-    [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'CodexSessionHealthHUD')
+    [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'CodexSessionHealthHUD'),
+    [switch]$NoShortcuts
 )
 
 $ErrorActionPreference = 'Stop'
-$fullInstallDir = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\')
+$fullInstallDir = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\\')
 $marker = Join-Path $fullInstallDir '.install-marker'
 $targetExe = Join-Path $fullInstallDir 'CodexSessionHealthHUD.exe'
 $programsDir = Join-Path ([Environment]::GetFolderPath('Programs')) 'Codex Session Health HUD'
@@ -12,15 +13,15 @@ $launcherShortcut = Join-Path $programsDir 'Codex with Session Health HUD.lnk'
 $taskbarShortcut = Join-Path $env:APPDATA `
     'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\Codex with Session Health HUD.lnk'
 
-if (-not (Test-Path -LiteralPath $marker)) { throw "Install marker not found: $marker" }
+if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) { throw "Install marker not found: $marker" }
 $markerValue = (Get-Content -LiteralPath $marker -Raw).Trim()
 if ($markerValue -ne 'CodexSessionHealthHUD|v1') { throw 'Install marker did not match this application.' }
 
-$driveRoot = [IO.Path]::GetPathRoot($fullInstallDir).TrimEnd('\')
-$userProfile = [IO.Path]::GetFullPath([Environment]::GetFolderPath('UserProfile')).TrimEnd('\')
-$localAppData = [IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\')
+$driveRoot = [IO.Path]::GetPathRoot($fullInstallDir).TrimEnd('\\')
+$userProfile = [IO.Path]::GetFullPath([Environment]::GetFolderPath('UserProfile')).TrimEnd('\\')
+$localAppData = [IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\\')
 if ($fullInstallDir -eq $driveRoot -or $fullInstallDir -eq $userProfile -or $fullInstallDir -eq $localAppData) {
-    throw "Refusing to recursively remove unsafe path: $fullInstallDir"
+    throw "Refusing to modify unsafe path: $fullInstallDir"
 }
 
 Get-CimInstance Win32_Process -Filter "Name='CodexSessionHealthHUD.exe'" -ErrorAction SilentlyContinue |
@@ -33,21 +34,74 @@ Get-CimInstance Win32_Process -Filter "Name='CodexSessionHealthHUD.exe'" -ErrorA
         } catch { }
     }
 
-foreach ($shortcutPath in @($launcherShortcut, $taskbarShortcut)) {
-    if (Test-Path -LiteralPath $shortcutPath) {
-        try { Remove-Item -LiteralPath $shortcutPath -Force } catch { }
+if (-not $NoShortcuts) {
+    foreach ($shortcutPath in @($launcherShortcut, $taskbarShortcut)) {
+        if (Test-Path -LiteralPath $shortcutPath) {
+            try { Remove-Item -LiteralPath $shortcutPath -Force } catch { }
+        }
+    }
+    if (Test-Path -LiteralPath $programsDir) {
+        try { Remove-Item -LiteralPath $programsDir -Recurse -Force } catch { }
     }
 }
-if (Test-Path -LiteralPath $programsDir) {
-    try { Remove-Item -LiteralPath $programsDir -Recurse -Force } catch { }
+
+$ownedFiles = @(
+    'CodexSessionHealthHUD.exe',
+    'Launch-CodexWithSessionHealthHUD.ps1',
+    'Uninstall.ps1',
+    'README.md',
+    'README.ko.md',
+    'CHANGELOG.md',
+    'LICENSE',
+    'THIRD_PARTY_NOTICES.md',
+    'Codex.ico',
+    'state.json'
+)
+foreach ($relativePath in $ownedFiles) {
+    $path = Join-Path $fullInstallDir $relativePath
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        try { Remove-Item -LiteralPath $path -Force } catch { }
+    }
+}
+
+foreach ($pattern in @('state.corrupt.*.json', 'state.oversized.*.json', 'state.unsupported.*.json', 'state.json.tmp-*')) {
+    Get-ChildItem -LiteralPath $fullInstallDir -File -Filter $pattern -ErrorAction SilentlyContinue |
+        ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -Force } catch { } }
+}
+
+$assetPath = Join-Path $fullInstallDir 'assets\\hud-composer.svg'
+if (Test-Path -LiteralPath $assetPath -PathType Leaf) {
+    try { Remove-Item -LiteralPath $assetPath -Force } catch { }
+}
+$assetsDir = Join-Path $fullInstallDir 'assets'
+if (Test-Path -LiteralPath $assetsDir -PathType Container) {
+    try {
+        if (@(Get-ChildItem -LiteralPath $assetsDir -Force).Count -eq 0) {
+            Remove-Item -LiteralPath $assetsDir -Force
+        }
+    } catch { }
+}
+
+# Remove the ownership marker last. Never recursively delete InstallDir: a custom
+# install directory may contain unrelated user files from before this safeguard.
+if (Test-Path -LiteralPath $marker -PathType Leaf) {
+    Remove-Item -LiteralPath $marker -Force
 }
 
 try {
-    $currentDirectory = [IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\')
-    if ($currentDirectory.StartsWith($fullInstallDir, [StringComparison]::OrdinalIgnoreCase)) {
+    $currentDirectory = [IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\\')
+    if ($currentDirectory.StartsWith($fullInstallDir + '\\', [StringComparison]::OrdinalIgnoreCase) -or
+        $currentDirectory -eq $fullInstallDir) {
         Set-Location -LiteralPath ([IO.Path]::GetTempPath())
     }
 } catch { }
 
-Remove-Item -LiteralPath $fullInstallDir -Recurse -Force
-Write-Host 'Codex Session Health HUD was removed, including its state directory. Codex data was not modified.'
+if (Test-Path -LiteralPath $fullInstallDir -PathType Container) {
+    try {
+        if (@(Get-ChildItem -LiteralPath $fullInstallDir -Force).Count -eq 0) {
+            Remove-Item -LiteralPath $fullInstallDir -Force
+        }
+    } catch { }
+}
+
+Write-Host 'Codex Session Health HUD files and state were removed. Codex data and unrelated files were not modified.'

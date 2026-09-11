@@ -43,12 +43,16 @@ namespace CodexSessionHealthHUD
     {
         private const int SchemaVersion = 1;
         private const long MaximumStateFileBytes = 4L * 1024L * 1024L;
+        private const long MaximumReadStateFileBytes = 8L * 1024L * 1024L;
         private const int MaximumThreadEntries = 10000;
         private const string StateMutexName = "Local\\CodexSessionHealthHUD.State";
 
         private readonly object gate = new object();
         private readonly string statePath;
         private readonly string runId;
+        private readonly int maximumThreadEntries;
+        private readonly long maximumStateFileBytes;
+        private readonly long maximumReadStateFileBytes;
         private readonly JavaScriptSerializer serializer;
         private HudPersistentState state;
 
@@ -58,14 +62,32 @@ namespace CodexSessionHealthHUD
         }
 
         internal HudStateStore(string statePath, string runId)
+            : this(statePath, runId, MaximumThreadEntries, MaximumStateFileBytes, MaximumReadStateFileBytes)
+        {
+        }
+
+        internal HudStateStore(string statePath, string runId, int maximumThreadEntries, long maximumStateFileBytes)
+            : this(statePath, runId, maximumThreadEntries, maximumStateFileBytes,
+                Math.Max(maximumStateFileBytes * 2L, maximumStateFileBytes + 65536L))
+        {
+        }
+
+        private HudStateStore(string statePath, string runId, int maximumThreadEntries,
+            long maximumStateFileBytes, long maximumReadStateFileBytes)
         {
             this.statePath = statePath;
             this.runId = string.IsNullOrWhiteSpace(runId) ? Guid.NewGuid().ToString("N") : runId;
+            this.maximumThreadEntries = Math.Max(1, maximumThreadEntries);
+            this.maximumStateFileBytes = Math.Max(512L, maximumStateFileBytes);
+            this.maximumReadStateFileBytes = Math.Max(this.maximumStateFileBytes, maximumReadStateFileBytes);
             serializer = new JavaScriptSerializer();
             serializer.MaxJsonLength = 8 * 1024 * 1024;
             serializer.RecursionLimit = 64;
             state = Load();
+            bool changed = TrimToLimits(null);
             if (InvalidateForeignPendingMeasurements())
+                changed = true;
+            if (changed)
                 SaveLocked();
         }
 
@@ -118,9 +140,8 @@ namespace CodexSessionHealthHUD
 
             lock (gate)
             {
-                if (state.threads.Count >= MaximumThreadEntries && !state.threads.ContainsKey(threadId))
-                    return;
                 state.threads[threadId] = next;
+                TrimToLimits(threadId);
                 SaveLocked();
             }
         }
@@ -132,7 +153,7 @@ namespace CodexSessionHealthHUD
                 FileInfo file = new FileInfo(statePath);
                 if (!file.Exists)
                     return new HudPersistentState();
-                if (file.Length <= 0 || file.Length > MaximumStateFileBytes)
+                if (file.Length <= 0 || file.Length > maximumReadStateFileBytes)
                 {
                     Quarantine("oversized");
                     return new HudPersistentState();
@@ -150,8 +171,6 @@ namespace CodexSessionHealthHUD
                     new Dictionary<string, HudThreadState>(StringComparer.Ordinal);
                 foreach (KeyValuePair<string, HudThreadState> pair in loaded.threads)
                 {
-                    if (sanitized.Count >= MaximumThreadEntries)
-                        break;
                     if (!IsSafeIdentifier(pair.Key) || pair.Value == null)
                         continue;
                     HudThreadState item = SanitizeThreadState(pair.Value);
@@ -226,7 +245,100 @@ namespace CodexSessionHealthHUD
             }
             if (!string.Equals(item.postCompactionStatus, "measuring", StringComparison.Ordinal))
                 item.captureRunId = null;
+            DateTimeOffset captured;
+            if (!string.IsNullOrWhiteSpace(item.capturedAt) && !TryCapturedAt(item, out captured))
+                item.capturedAt = null;
             return item;
+        }
+
+        private static bool TryCapturedAt(HudThreadState item, out DateTimeOffset value)
+        {
+            value = default(DateTimeOffset);
+            return item != null && !string.IsNullOrWhiteSpace(item.capturedAt) &&
+                DateTimeOffset.TryParse(item.capturedAt, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out value);
+        }
+
+        private static int RetentionRank(HudThreadState item)
+        {
+            if (item == null)
+                return 0;
+            if (string.Equals(item.postCompactionStatus, "ready", StringComparison.Ordinal))
+            {
+                DateTimeOffset captured;
+                return TryCapturedAt(item, out captured) ? 3 : 2;
+            }
+            if (string.Equals(item.postCompactionStatus, "measuring", StringComparison.Ordinal))
+                return 1;
+            return 0;
+        }
+
+        private List<KeyValuePair<string, HudThreadState>> EvictionCandidates(string protectedThreadId)
+        {
+            List<KeyValuePair<string, HudThreadState>> candidates =
+                new List<KeyValuePair<string, HudThreadState>>();
+            foreach (KeyValuePair<string, HudThreadState> pair in state.threads)
+            {
+                if (!string.IsNullOrEmpty(protectedThreadId) &&
+                    string.Equals(pair.Key, protectedThreadId, StringComparison.Ordinal))
+                    continue;
+                candidates.Add(pair);
+            }
+            candidates.Sort(delegate(KeyValuePair<string, HudThreadState> left,
+                KeyValuePair<string, HudThreadState> right)
+            {
+                int rank = RetentionRank(left.Value).CompareTo(RetentionRank(right.Value));
+                if (rank != 0)
+                    return rank;
+                DateTimeOffset leftTime;
+                DateTimeOffset rightTime;
+                bool leftHas = TryCapturedAt(left.Value, out leftTime);
+                bool rightHas = TryCapturedAt(right.Value, out rightTime);
+                if (leftHas && rightHas)
+                {
+                    int time = leftTime.CompareTo(rightTime);
+                    if (time != 0)
+                        return time;
+                }
+                else if (leftHas != rightHas)
+                {
+                    return leftHas ? 1 : -1;
+                }
+                return string.CompareOrdinal(left.Key, right.Key);
+            });
+            return candidates;
+        }
+
+        private bool TrimToLimits(string protectedThreadId)
+        {
+            bool changed = false;
+            List<KeyValuePair<string, HudThreadState>> candidates = EvictionCandidates(protectedThreadId);
+            int index = 0;
+
+            int excessEntries = Math.Max(0, state.threads.Count - maximumThreadEntries);
+            while (excessEntries > 0 && index < candidates.Count)
+            {
+                if (state.threads.Remove(candidates[index++].Key))
+                {
+                    excessEntries -= 1;
+                    changed = true;
+                }
+            }
+
+            long bytes = Encoding.UTF8.GetByteCount(serializer.Serialize(state));
+            while (bytes > maximumStateFileBytes && index < candidates.Count)
+            {
+                long average = Math.Max(1L, bytes / Math.Max(1, state.threads.Count));
+                int removeCount = (int)Math.Max(1L,
+                    (bytes - maximumStateFileBytes + average - 1L) / average);
+                for (int i = 0; i < removeCount && index < candidates.Count; i++)
+                {
+                    if (state.threads.Remove(candidates[index++].Key))
+                        changed = true;
+                }
+                bytes = Encoding.UTF8.GetByteCount(serializer.Serialize(state));
+            }
+            return changed;
         }
 
         private void SaveLocked()
@@ -237,7 +349,7 @@ namespace CodexSessionHealthHUD
             Directory.CreateDirectory(directory);
 
             string json = serializer.Serialize(state);
-            if (Encoding.UTF8.GetByteCount(json) > MaximumStateFileBytes)
+            if (Encoding.UTF8.GetByteCount(json) > maximumStateFileBytes)
                 return;
 
             using (Mutex mutex = new Mutex(false, StateMutexName))

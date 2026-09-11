@@ -27,19 +27,46 @@ function Show-HudMessage {
         [Windows.Forms.MessageBoxButtons]::OK, $iconValue)
 }
 
-function Get-CodexAppUserModelId {
+function Get-CodexPackage {
     $package = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |
         Sort-Object Version -Descending | Select-Object -First 1
     if (-not $package) { throw 'Microsoft Store Codex Desktop was not found.' }
     if ([string]::IsNullOrWhiteSpace($package.InstallLocation)) {
         throw 'Codex Desktop is installed, but Windows did not expose its package install location.'
     }
-    $manifestPath = Join-Path $package.InstallLocation 'AppxManifest.xml'
+    return $package
+}
+
+function Get-CodexAppUserModelId {
+    param([Parameter(Mandatory)] $Package)
+    $manifestPath = Join-Path $Package.InstallLocation 'AppxManifest.xml'
     if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'Codex AppxManifest.xml is unavailable.' }
     [xml]$manifest = Get-Content -LiteralPath $manifestPath -Raw
     $application = $manifest.SelectSingleNode("/*[local-name()='Package']/*[local-name()='Applications']/*[local-name()='Application'][1]")
     if (-not $application -or -not $application.Id) { throw 'Could not read the Codex application identifier.' }
-    return "$($package.PackageFamilyName)!$($application.Id)"
+    return "$($Package.PackageFamilyName)!$($application.Id)"
+}
+
+function Get-CodexPackageRoot {
+    param([Parameter(Mandatory)] $Package)
+    return ([IO.Path]::GetFullPath($Package.InstallLocation).TrimEnd('\\') + '\\')
+}
+
+function Test-IsCodexProcess {
+    param([Parameter(Mandatory)] $Process, [Parameter(Mandatory)] [string]$PackageRoot)
+    if (-not $Process -or [string]::IsNullOrWhiteSpace([string]$Process.ExecutablePath)) { return $false }
+    try {
+        $path = [IO.Path]::GetFullPath([string]$Process.ExecutablePath)
+        return $path.StartsWith($PackageRoot, [StringComparison]::OrdinalIgnoreCase)
+    } catch {
+        return $false
+    }
+}
+
+function Get-ProcessByIdCim {
+    param([uint32]$ProcessId)
+    return Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue |
+        Select-Object -First 1
 }
 
 function Start-PackagedCodex {
@@ -92,14 +119,21 @@ try {
         throw 'CodexSessionHealthHUD.exe was not found. Reinstall the HUD.'
     }
 
-    $running = @(Get-CimInstance Win32_Process -Filter "Name='ChatGPT.exe'" -ErrorAction SilentlyContinue)
-    $debugPattern = "(?:^|\s)--remote-debugging-port(?:=|\s+)$Port(?:\s|$)"
-    if ($running | Where-Object { $_.CommandLine -match $debugPattern }) {
-        Start-Process -FilePath $hudExe -ArgumentList @('--renderer-attach', $Port) `
+    $package = Get-CodexPackage
+    $packageRoot = Get-CodexPackageRoot -Package $package
+    $listener = Get-DebugListener -LocalPort $Port
+    if ($listener) {
+        $owner = Get-ProcessByIdCim -ProcessId ([uint32]$listener.OwningProcess)
+        if (-not (Test-IsCodexProcess -Process $owner -PackageRoot $packageRoot)) {
+            throw "Local port $Port is already in use by a non-Codex process. Codex and the HUD were not started."
+        }
+        Start-Process -FilePath $hudExe -ArgumentList @('--renderer-attach', $Port, [int]$listener.OwningProcess) `
             -WorkingDirectory $InstallDir -WindowStyle Hidden
         exit 0
     }
 
+    $running = @(Get-CimInstance Win32_Process -Filter "Name='ChatGPT.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { Test-IsCodexProcess -Process $_ -PackageRoot $packageRoot })
     if ($running.Count -gt 0) {
         Show-HudMessage -Message (
             'Codex is already running without the local HUD debugging port.' + [Environment]::NewLine +
@@ -108,20 +142,15 @@ try {
         exit 3
     }
 
-    if (Get-DebugListener -LocalPort $Port) {
-        throw "Local port $Port is already in use. Codex and the HUD were not started."
-    }
-
-    $appUserModelId = Get-CodexAppUserModelId
+    $appUserModelId = Get-CodexAppUserModelId -Package $package
     $activationArguments = @(
         '--remote-debugging-address=127.0.0.1',
         "--remote-debugging-port=$Port"
     ) -join ' '
-    $codexProcessId = Start-PackagedCodex -AppUserModelId $appUserModelId -Arguments $activationArguments
+    [void](Start-PackagedCodex -AppUserModelId $appUserModelId -Arguments $activationArguments)
 
     $listener = $null
     for ($attempt = 0; $attempt -lt 60 -and -not $listener; $attempt++) {
-        if (-not (Get-Process -Id $codexProcessId -ErrorAction SilentlyContinue)) { break }
         $listener = Get-DebugListener -LocalPort $Port
         if (-not $listener) { Start-Sleep -Milliseconds 250 }
     }
@@ -131,7 +160,12 @@ try {
         exit 4
     }
 
-    Start-Process -FilePath $hudExe -ArgumentList @('--renderer-attach', $Port) `
+    $owner = Get-ProcessByIdCim -ProcessId ([uint32]$listener.OwningProcess)
+    if (-not (Test-IsCodexProcess -Process $owner -PackageRoot $packageRoot)) {
+        throw "Local port $Port became owned by a non-Codex process. The HUD was not attached."
+    }
+
+    Start-Process -FilePath $hudExe -ArgumentList @('--renderer-attach', $Port, [int]$listener.OwningProcess) `
         -WorkingDirectory $InstallDir -WindowStyle Hidden
 } catch {
     $message = 'Codex Session Health HUD could not start.' + [Environment]::NewLine +
