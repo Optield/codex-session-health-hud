@@ -1,0 +1,62 @@
+name: apply v0.1.6 performance lifecycle audit
+
+on:
+  push:
+    paths:
+      - .github/workflows/apply-v016-performance-lifecycle-audit.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply performance lifecycle audit patch
+        shell: pwsh
+        run: python .\scripts\apply-v016-performance-lifecycle-audit.py
+
+      - name: Check renderer syntax
+        shell: pwsh
+        run: node --check .\RendererHudScript.js
+
+      - name: Test renderer logic
+        shell: pwsh
+        run: node .\tests\renderer-logic.test.js
+
+      - name: Build and run self-tests
+        shell: pwsh
+        run: .\Build.ps1
+
+      - name: Test host lifecycle
+        shell: pwsh
+        run: .\tests\host-lifecycle.test.ps1
+
+      - name: Test install safety
+        shell: pwsh
+        run: .\tests\install-safety.test.ps1
+
+      - name: Create Windows package
+        shell: pwsh
+        run: .\Package.ps1 -OutputDir .\dist
+
+      - name: Test Windows package
+        shell: pwsh
+        run: .\tests\package-layout.test.ps1 -PackagePath .\dist\CodexSessionHealthHUD-win-x64.zip
+
+      - name: Verify diff
+        shell: pwsh
+        run: |
+          git diff --check
+          git diff -- RendererHudBridge.cs CodexSessionHealthHUD.cs HudStateStore.cs Launch-CodexWithSessionHealthHUD.ps1 tests/package-layout.test.ps1
+
+      - name: Commit performance lifecycle refinements
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add RendererHudBridge.cs CodexSessionHealthHUD.cs HudStateStore.cs Launch-CodexWithSessionHealthHUD.ps1 tests/package-layout.test.ps1
+          git commit -m "Bound failure recovery without steady-state overhead"
+          git push
