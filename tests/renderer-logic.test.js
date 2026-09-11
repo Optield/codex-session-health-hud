@@ -122,6 +122,112 @@ const expectedCaptured = `${capturedDate.getFullYear()}-${padCaptured(capturedDa
 assert.equal(t.formatCapturedAt(capturedIso), expectedCaptured, 'capture time is formatted in local YYYY-MM-DD HH:mm');
 assert.equal(t.formatCapturedAt('not-a-date'), '', 'invalid capture time is hidden');
 
+
+assert.equal(t.isUnsupportedMethodError({ code: -32601, message: 'Method not found' }), true,
+  'JSON-RPC Method Not Found enables legacy compatibility mode');
+assert.equal(t.isUnsupportedMethodError(new Error('Method not found')), true,
+  'explicit Method Not Found text enables legacy compatibility mode');
+assert.equal(t.isUnsupportedMethodError(new Error('request timed out while calling method')), false,
+  'transient errors that merely mention method do not disable the list API');
+assert.equal(t.historyRetryDelay(1), 300);
+assert.equal(t.historyRetryDelay(5), 15000);
+assert.equal(t.historyRetryDelay(99), 15000, 'history retry delay is capped');
+
+const loadedHistory = {
+  turns: [
+    { item: { type: 'contextCompaction', id: 'history-1' } },
+    { nested: [{ type: 'contextCompaction', id: 'history-2' }] }
+  ],
+  duplicate: { type: 'contextCompaction', id: 'history-1' }
+};
+const countedHistory = t.countCompactionsInLoadedHistory(loadedHistory);
+assert.equal(countedHistory.count, 2, 'bounded loaded-history scan deduplicates compaction IDs');
+assert.equal(countedHistory.latestId, 'history-2');
+
+let persistedPayload = null;
+window.__codexSessionHealthHudPersist = payload => { persistedPayload = JSON.parse(payload); };
+t.persistThreadForTest({
+  threadId: 'capture-without-time',
+  compactionCount: 1,
+  lastObservedCompactionId: 'capture-1',
+  snapshotCompactionId: 'capture-1',
+  postStatus: 'ready',
+  postTokens: 1000,
+  postWindow: 10000,
+  captureRunId: '',
+  capturedAt: ''
+});
+assert.equal(persistedPayload.state.capturedAt, null,
+  'ready snapshots without a measured capture time do not invent the current time');
+delete window.__codexSessionHealthHudPersist;
+
+t.clearCompactionPairing();
+const legacyFirst = t.threadRuntimeForTest('pair-legacy-first');
+legacyFirst.compactionCount = 0;
+t.handleLegacyCompacted({ threadId: 'pair-legacy-first', turnId: 'turn-1' });
+assert.equal(legacyFirst.compactionCount, 1);
+const legacyIdentity = legacyFirst.snapshotCompactionId;
+legacyFirst.postStatus = 'ready';
+legacyFirst.postTokens = 34002;
+legacyFirst.postWindow = 258400;
+legacyFirst.capturedAt = capturedIso;
+t.handleCompletedCompaction({
+  threadId: 'pair-legacy-first', turnId: 'turn-1',
+  item: { type: 'contextCompaction', id: 'real-1' }
+});
+assert.equal(legacyFirst.compactionCount, 1, 'late primary event does not double-count a legacy compaction');
+assert.notEqual(legacyIdentity, 'real-1');
+assert.equal(legacyFirst.snapshotCompactionId, 'real-1', 'late primary event upgrades the provisional identity');
+assert.equal(legacyFirst.postStatus, 'ready', 'identity upgrade preserves captured status');
+assert.equal(legacyFirst.postTokens, 34002, 'identity upgrade preserves captured tokens');
+assert.equal(legacyFirst.capturedAt, capturedIso, 'identity upgrade preserves capture time');
+
+const primaryFirst = t.threadRuntimeForTest('pair-primary-first');
+primaryFirst.compactionCount = 0;
+t.handleCompletedCompaction({
+  threadId: 'pair-primary-first', turnId: 'turn-2',
+  item: { type: 'contextCompaction', id: 'real-2' }
+});
+t.handleLegacyCompacted({ threadId: 'pair-primary-first', turnId: 'turn-2' });
+assert.equal(primaryFirst.compactionCount, 1, 'legacy fallback after primary does not double-count');
+
+const multipleSameTurn = t.threadRuntimeForTest('pair-multiple');
+multipleSameTurn.compactionCount = 0;
+t.handleLegacyCompacted({ threadId: 'pair-multiple', turnId: 'turn-multi' });
+t.handleLegacyCompacted({ threadId: 'pair-multiple', turnId: 'turn-multi' });
+assert.equal(multipleSameTurn.compactionCount, 2, 'multiple legitimate compactions in one turn remain distinct');
+t.handleCompletedCompaction({
+  threadId: 'pair-multiple', turnId: 'turn-multi',
+  item: { type: 'contextCompaction', id: 'multi-1' }
+});
+t.handleCompletedCompaction({
+  threadId: 'pair-multiple', turnId: 'turn-multi',
+  item: { type: 'contextCompaction', id: 'multi-2' }
+});
+assert.equal(multipleSameTurn.compactionCount, 2, 'paired primary events do not add duplicate counts');
+assert.equal(multipleSameTurn.snapshotCompactionId, 'multi-2');
+
+for (let i = 0; i < 600; i++) {
+  t.handleCompletedCompaction({
+    threadId: 'pair-bound', turnId: `turn-bound-${i}`,
+    item: { type: 'contextCompaction', id: `bound-${i}` }
+  });
+}
+assert.ok(t.compactionPairCount() <= 512, 'unmatched compaction pairing state is bounded');
+t.clearCompactionPairing();
+
+assert.equal(t.quotaRetryDelay(1), 700);
+assert.equal(t.quotaRetryDelay(8), 700);
+assert.equal(t.quotaRetryDelay(9), 2000);
+assert.equal(t.quotaRetryDelay(13), 30000);
+assert.equal(t.quotaRetryDelay(100), 30000, 'quota failure backoff is capped');
+
+const rendererSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'RendererHudScript.js'), 'utf8');
+assert.equal(rendererSource.includes("readThread(threadId, { includeTurns: true })"), false,
+  'legacy history fallback never hydrates the full thread');
+assert.equal(rendererSource.includes("runtime.capturedAt || new Date().toISOString()"), false,
+  'persistence never fabricates a capture timestamp');
+
 const persistedReadyDuringSync = {
   postStatus: 'syncing',
   snapshotCompactionId: 'compact-1',

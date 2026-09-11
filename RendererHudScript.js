@@ -16,6 +16,10 @@
   const FIVE_HOUR_MINUTES = 300;
   const WEEKLY_MINUTES = 10080;
   const HISTORY_PAGE_SIZE = 200;
+  const HISTORY_RETRY_DELAYS = [300, 1000, 3000, 8000, 15000];
+  const LEGACY_HISTORY_MAX_NODES = 100000;
+  const LEGACY_HISTORY_MAX_DEPTH = 12;
+  const MAX_COMPACTION_PAIR_KEYS = 512;
   const MAX_ENVELOPE_DEPTH = 4;
   const MAX_ENVELOPE_NODES = 48;
 
@@ -34,7 +38,7 @@
 
   const runtimeThreads = new Map();
   const rateLimitsById = new Map();
-  const completedCompactionTurns = new Map();
+  const compactionTurnPairs = new Map();
   let eventSequence = 0;
   let activeThreadId = '';
   let cachedConversationManager = null;
@@ -140,7 +144,9 @@
       capturedAt: saved ? stringValue(saved.capturedAt) : '',
       measurementArmedSeq: 0,
       syncInFlight: false,
+      syncTimer: 0,
       syncGeneration: 0,
+      historyRetryAttempts: 0,
       validatedThisRun: false,
       historyDirty: false,
       seenCompactionIds: new Set(),
@@ -171,7 +177,7 @@
         postCompactionTokens: runtime.postStatus === 'ready' && runtime.postTokens >= 0 ? Math.round(runtime.postTokens) : null,
         postCompactionWindow: runtime.postStatus === 'ready' && runtime.postWindow > 0 ? Math.round(runtime.postWindow) : null,
         captureRunId: runtime.postStatus === 'measuring' ? runId || null : null,
-        capturedAt: runtime.postStatus === 'ready' ? runtime.capturedAt || new Date().toISOString() : null
+        capturedAt: runtime.postStatus === 'ready' ? runtime.capturedAt || null : null
       }
     };
     try { window[PERSIST_BINDING](JSON.stringify(payload)); } catch (_) { }
@@ -265,6 +271,7 @@
     activeThreadId = threadId || '';
     if (activeThreadId) {
       const runtime = threadRuntime(activeThreadId);
+      runtime.historyRetryAttempts = 0;
       if (!runtime.validatedThisRun || runtime.historyDirty) {
         runtime.postStatus = 'syncing';
         scheduleCompactionSync(activeThreadId, 0);
@@ -291,7 +298,12 @@
   async function sendRequest(method, params) {
     const manager = conversationManager();
     if (!manager || typeof manager.sendRequest !== 'function') throw new Error('conversation manager unavailable');
-    return await Promise.resolve(manager.sendRequest(method, params || {}));
+    try {
+      return await Promise.resolve(manager.sendRequest(method, params || {}));
+    } catch (error) {
+      if (cachedConversationManager === manager) cachedConversationManager = null;
+      throw error;
+    }
   }
 
   function itemType(item) {
@@ -307,15 +319,46 @@
     return stringValue(first(item, ['id', 'itemId', 'item_id']));
   }
 
+  function isUnsupportedMethodError(error) {
+    if (!error) return false;
+    const code = number(error.code ?? (error.error && error.error.code));
+    if (code === -32601) return true;
+    const message = String(error.message || error);
+    return /(?:method\s+not\s+found|unknown\s+method|unsupported\s+method|method\s+is\s+not\s+supported)/i.test(message);
+  }
+
+  function historyRetryDelay(attempt) {
+    const index = Math.max(0, Math.min(HISTORY_RETRY_DELAYS.length - 1, Number(attempt || 1) - 1));
+    return HISTORY_RETRY_DELAYS[index];
+  }
+
+  function failTransientHistorySync(runtime, generation) {
+    if (!runtime || generation !== runtime.syncGeneration) return;
+    runtime.syncInFlight = false;
+    runtime.historyDirty = true;
+    runtime.validatedThisRun = false;
+    runtime.historyRetryAttempts += 1;
+    if (runtime.historyRetryAttempts < HISTORY_RETRY_DELAYS.length) {
+      if (runtime.threadId === activeThreadId) runtime.postStatus = 'syncing';
+      scheduleCompactionSync(runtime.threadId, historyRetryDelay(runtime.historyRetryAttempts));
+    } else if (runtime.threadId === activeThreadId) {
+      runtime.postStatus = 'unavailable';
+    }
+    if (runtime.threadId === activeThreadId) renderActive();
+  }
+
   function scheduleCompactionSync(threadId, delay = 120) {
     const runtime = threadRuntime(threadId);
-    if (!runtime || runtime.syncInFlight) return;
+    if (!runtime || runtime.syncInFlight || runtime.syncTimer) return;
     const generation = ++runtime.syncGeneration;
-    window.setTimeout(() => {
+    runtime.syncTimer = window.setTimeout(() => {
+      runtime.syncTimer = 0;
       if (disposed || runtime.syncInFlight || generation !== runtime.syncGeneration) return;
       syncCompactions(runtime).catch(() => {
         if (generation !== runtime.syncGeneration) return;
         runtime.syncInFlight = false;
+        runtime.historyDirty = true;
+        runtime.validatedThisRun = false;
         runtime.postStatus = 'unavailable';
         if (runtime.threadId === activeThreadId) renderActive();
       });
@@ -333,7 +376,6 @@
     let anchorFound = false;
     let cursor = null;
     let pages = 0;
-    let usedListApi = false;
     let listResultComplete = false;
 
     if (historyListCapability !== 'unsupported') {
@@ -342,7 +384,6 @@
           const params = { threadId: runtime.threadId, limit: HISTORY_PAGE_SIZE, sortDirection: 'desc' };
           if (cursor) params.cursor = cursor;
           const response = await sendRequest('thread/items/list', params);
-          usedListApi = true;
           historyListCapability = 'supported';
           const data = response && Array.isArray(response.data) ? response.data : [];
           for (const entry of data) {
@@ -365,23 +406,31 @@
         } while (cursor && pages < 10000);
         listResultComplete = anchorFound || !cursor;
       } catch (error) {
-        const text = String(error && (error.message || error));
-        if (/method|not found|unknown|not supported|unsupported/i.test(text)) historyListCapability = 'unsupported';
-        else if (historyListCapability === 'unknown') historyListCapability = 'unknown';
+        if (isUnsupportedMethodError(error)) {
+          historyListCapability = 'unsupported';
+        } else {
+          failTransientHistorySync(runtime, generation);
+          return;
+        }
       }
     }
 
-    if (!usedListApi || !listResultComplete) {
+    if (historyListCapability === 'unsupported') {
       const legacy = await legacyCompactionSnapshot(runtime.threadId);
       latestId = legacy.latestId;
       fullCount = legacy.count;
       anchorFound = false;
+      listResultComplete = true;
+    } else if (!listResultComplete) {
+      failTransientHistorySync(runtime, generation);
+      return;
     }
 
     if (generation !== runtime.syncGeneration) return;
     runtime.syncInFlight = false;
     runtime.historyDirty = false;
     runtime.validatedThisRun = true;
+    runtime.historyRetryAttempts = 0;
 
     if (anchorFound && cachedCount >= 0) runtime.compactionCount = cachedCount + countNewer;
     else runtime.compactionCount = fullCount;
@@ -393,34 +442,22 @@
     if (runtime.threadId === activeThreadId) renderRisk();
   }
 
-  async function legacyCompactionSnapshot(threadId) {
-    const manager = conversationManager();
-    if (!manager) throw new Error('thread history unavailable');
-    let result = null;
-    try {
-      const conversation = typeof manager.getConversation === 'function' ? manager.getConversation(threadId) : null;
-      const entities = conversation && conversation.turnHistory && conversation.turnHistory.history &&
-        conversation.turnHistory.history.entitiesByKey;
-      const hasCompleteHistory = conversation && conversation.turnsPagination &&
-        conversation.turnsPagination.hasLoadedOldest === true;
-      if (hasCompleteHistory) {
-        result = {
-          turns: Array.isArray(conversation.turns) ? conversation.turns : [],
-          history: entities && typeof entities === 'object' ? Object.values(entities) : []
-        };
-      }
-    } catch (_) { }
-    if (!result) {
-      if (typeof manager.readThread !== 'function') throw new Error('thread history unavailable');
-      result = await Promise.resolve(manager.readThread(threadId, { includeTurns: true }));
-    }
+  function countCompactionsInLoadedHistory(result) {
     let count = 0;
     let latestId = '';
     const seenObjects = new WeakSet();
     const seenIds = new Set();
-    const walk = value => {
-      if (!value || typeof value !== 'object' || seenObjects.has(value)) return;
+    const stack = [{ value: result, depth: 0 }];
+    let visited = 0;
+
+    while (stack.length) {
+      if (visited >= LEGACY_HISTORY_MAX_NODES) throw new Error('loaded thread history exceeded safety limit');
+      const node = stack.pop();
+      const value = node.value;
+      if (!value || typeof value !== 'object' || seenObjects.has(value)) continue;
       seenObjects.add(value);
+      visited += 1;
+
       if (isCompactionItem(value)) {
         const id = compactionId(value);
         if (!id || !seenIds.has(id)) {
@@ -431,16 +468,32 @@
           }
         }
       }
-      if (Array.isArray(value)) {
-        for (const child of value) walk(child);
-      } else {
-        for (const child of Object.values(value)) walk(child);
+      if (node.depth >= LEGACY_HISTORY_MAX_DEPTH) continue;
+
+      const children = Array.isArray(value) ? value : Object.values(value);
+      for (let i = children.length - 1; i >= 0; i--) {
+        const child = children[i];
+        if (child && typeof child === 'object') stack.push({ value: child, depth: node.depth + 1 });
       }
-    };
-    walk(result);
+    }
     return { count, latestId };
   }
 
+  async function legacyCompactionSnapshot(threadId) {
+    const manager = conversationManager();
+    if (!manager || typeof manager.getConversation !== 'function') throw new Error('thread history unavailable');
+    let conversation = null;
+    try { conversation = manager.getConversation(threadId); } catch (_) { }
+    const entities = conversation && conversation.turnHistory && conversation.turnHistory.history &&
+      conversation.turnHistory.history.entitiesByKey;
+    const hasCompleteHistory = conversation && conversation.turnsPagination &&
+      conversation.turnsPagination.hasLoadedOldest === true;
+    if (!hasCompleteHistory) throw new Error('loaded thread history is incomplete');
+    return countCompactionsInLoadedHistory({
+      turns: Array.isArray(conversation.turns) ? conversation.turns : [],
+      history: entities && typeof entities === 'object' ? entities : {}
+    });
+  }
   function reconcileSnapshotToHistory(runtime, latestId) {
     if (!latestId) {
       runtime.postStatus = 'noCompaction';
@@ -472,16 +525,56 @@
     runtime.capturedAt = '';
   }
 
+  function trimCompactionPairMap() {
+    while (compactionTurnPairs.size > MAX_COMPACTION_PAIR_KEYS) {
+      const oldest = compactionTurnPairs.keys().next().value;
+      if (oldest === undefined) break;
+      compactionTurnPairs.delete(oldest);
+    }
+  }
+
+  function compactionPairState(threadId, turnId) {
+    const key = `${threadId}:${turnId}`;
+    let state = compactionTurnPairs.get(key);
+    if (!state) {
+      state = { legacySeen: 0, primarySeen: 0, legacyKeys: [] };
+      compactionTurnPairs.set(key, state);
+      trimCompactionPairMap();
+    }
+    return { key, state };
+  }
+
+  function maybeFinishCompactionPair(pairKey, state) {
+    if (state && state.legacySeen > 0 && state.legacySeen === state.primarySeen) {
+      compactionTurnPairs.delete(pairKey);
+    }
+  }
+
+  function upgradeCompactionIdentity(threadId, oldKey, newId) {
+    if (!threadId || !oldKey || !newId || oldKey === newId) return false;
+    const runtime = threadRuntime(threadId);
+    if (!runtime || runtime.seenCompactionIds.has(newId)) return false;
+    runtime.seenCompactionIds.delete(oldKey);
+    runtime.seenCompactionIds.add(newId);
+    if (runtime.lastObservedCompactionId === oldKey) runtime.lastObservedCompactionId = newId;
+    if (runtime.snapshotCompactionId === oldKey) runtime.snapshotCompactionId = newId;
+    persistThread(runtime);
+    if (threadId === activeThreadId) renderRisk();
+    return true;
+  }
+
   function registerCompletedCompaction(threadId, turnId, id, source) {
     if (!threadId) return;
     const runtime = threadRuntime(threadId);
-    const key = id || `${source}:${turnId || 'unknown'}`;
+    const key = id || `${source}:${turnId || 'unknown'}:${eventSequence}`;
     if (runtime.seenCompactionIds.has(key)) return;
     runtime.seenCompactionIds.add(key);
-    if (turnId) completedCompactionTurns.set(`${threadId}:${turnId}`, true);
 
     runtime.syncGeneration += 1;
     runtime.syncInFlight = false;
+    if (runtime.syncTimer) window.clearTimeout(runtime.syncTimer);
+    runtime.syncTimer = 0;
+    runtime.historyRetryAttempts = 0;
 
     if (runtime.compactionCount >= 0) runtime.compactionCount += 1;
     runtime.lastObservedCompactionId = key;
@@ -502,16 +595,62 @@
     if (threadId === activeThreadId) renderRisk();
   }
 
+  function handleCompletedCompaction(params) {
+    const item = first(params, ['item']);
+    if (!isCompactionItem(item)) return;
+    const threadId = stringValue(first(params, ['threadId', 'thread_id']));
+    const turnId = stringValue(first(params, ['turnId', 'turn_id']));
+    if (!threadId) return;
+    const runtime = threadRuntime(threadId);
+    const realId = compactionId(item);
+    if (realId && runtime.seenCompactionIds.has(realId)) return;
+
+    if (!turnId) {
+      registerCompletedCompaction(threadId, '', realId || `primary:unknown:${eventSequence}`, 'item/completed');
+      return;
+    }
+
+    const pair = compactionPairState(threadId, turnId);
+    pair.state.primarySeen += 1;
+    const ordinal = pair.state.primarySeen;
+    const legacyKey = pair.state.legacyKeys[ordinal - 1] || '';
+    if (legacyKey) {
+      if (realId) upgradeCompactionIdentity(threadId, legacyKey, realId);
+      maybeFinishCompactionPair(pair.key, pair.state);
+      return;
+    }
+
+    registerCompletedCompaction(threadId, turnId,
+      realId || `primary:${turnId}:${ordinal}`, 'item/completed');
+    maybeFinishCompactionPair(pair.key, pair.state);
+  }
+
   function handleLegacyCompacted(params) {
     const threadId = stringValue(first(params, ['threadId', 'thread_id']));
     const turnId = stringValue(first(params, ['turnId', 'turn_id']));
     if (!threadId) return;
-    window.setTimeout(() => {
-      if (turnId && completedCompactionTurns.has(`${threadId}:${turnId}`)) return;
-      registerCompletedCompaction(threadId, turnId, `legacy:${turnId || ++eventSequence}`, 'thread/compacted');
-    }, 80);
-  }
+    if (!turnId) {
+      const runtime = threadRuntime(threadId);
+      runtime.historyDirty = true;
+      runtime.validatedThisRun = false;
+      runtime.historyRetryAttempts = 0;
+      scheduleCompactionSync(threadId, 120);
+      return;
+    }
 
+    const pair = compactionPairState(threadId, turnId);
+    pair.state.legacySeen += 1;
+    const ordinal = pair.state.legacySeen;
+    if (pair.state.primarySeen >= ordinal) {
+      maybeFinishCompactionPair(pair.key, pair.state);
+      return;
+    }
+
+    const legacyKey = `legacy:${turnId}:${ordinal}`;
+    pair.state.legacyKeys[ordinal - 1] = legacyKey;
+    registerCompletedCompaction(threadId, turnId, legacyKey, 'thread/compacted');
+    maybeFinishCompactionPair(pair.key, pair.state);
+  }
   function usageBreakdownMeasured(last) {
     if (!last || typeof last !== 'object') return false;
     const values = [
@@ -649,6 +788,13 @@
     return window && Number.isFinite(window.usedPercent) ? clamp(100 - window.usedPercent) : null;
   }
 
+  function quotaRetryDelay(attempt) {
+    const value = Math.max(1, Number(attempt || 1));
+    if (value <= 8) return 700;
+    const exponent = Math.min(4, value - 9);
+    return Math.min(30000, 2000 * (2 ** exponent));
+  }
+
   async function requestRateLimits() {
     quotaRequestTimer = 0;
     quotaRequestAttempts += 1;
@@ -662,9 +808,9 @@
         renderUsage();
         return;
       }
-    } catch (_) { cachedConversationManager = null; }
-    if (!hasFullQuotaSnapshot && quotaRequestAttempts < 8 && !quotaRequestTimer) {
-      quotaRequestTimer = window.setTimeout(requestRateLimits, 700);
+    } catch (_) { }
+    if (!hasFullQuotaSnapshot && !quotaRequestTimer && !disposed) {
+      quotaRequestTimer = window.setTimeout(requestRateLimits, quotaRetryDelay(quotaRequestAttempts));
     }
   }
 
@@ -683,6 +829,9 @@
     const runtime = threadRuntime(threadId);
     runtime.syncGeneration += 1;
     runtime.syncInFlight = false;
+    if (runtime.syncTimer) window.clearTimeout(runtime.syncTimer);
+    runtime.syncTimer = 0;
+    runtime.historyRetryAttempts = 0;
     runtime.historyDirty = true;
     runtime.validatedThisRun = false;
     if (threadId === activeThreadId) {
@@ -710,11 +859,7 @@
       return;
     }
     if (method === 'item/completed') {
-      const item = first(params, ['item']);
-      if (!isCompactionItem(item)) return;
-      const threadId = stringValue(first(params, ['threadId', 'thread_id']));
-      const turnId = stringValue(first(params, ['turnId', 'turn_id']));
-      registerCompletedCompaction(threadId, turnId, compactionId(item), 'item/completed');
+      handleCompletedCompaction(params);
       return;
     }
     if (method === 'thread/compacted') {
@@ -1141,6 +1286,9 @@
     if (!document.hidden) {
       scheduleMount(0);
       scheduleActiveThreadRefresh(0);
+      if (!hasFullQuotaSnapshot && !quotaRequestTimer) {
+        quotaRequestTimer = window.setTimeout(requestRateLimits, 120);
+      }
     }
   };
   document.addEventListener('visibilitychange', onVisibility, true);
@@ -1156,6 +1304,11 @@
     if (activeThreadTimer) window.clearTimeout(activeThreadTimer);
     if (quotaRequestTimer) window.clearTimeout(quotaRequestTimer);
     if (tooltipTimer) window.clearTimeout(tooltipTimer);
+    for (const runtime of runtimeThreads.values()) {
+      if (runtime.syncTimer) window.clearTimeout(runtime.syncTimer);
+      runtime.syncTimer = 0;
+    }
+    compactionTurnPairs.clear();
     mountTimer = activeThreadTimer = quotaRequestTimer = tooltipTimer = 0;
     if (host) host.remove();
     host = null;
@@ -1182,10 +1335,20 @@
       applyUsageTelemetry,
       hydrateCurrentUsageFromSnapshot,
       usageBreakdownMeasured,
+      isUnsupportedMethodError,
+      historyRetryDelay,
+      countCompactionsInLoadedHistory,
+      handleCompletedCompaction,
+      handleLegacyCompacted,
+      compactionPairCount: () => compactionTurnPairs.size,
+      clearCompactionPairing: () => compactionTurnPairs.clear(),
+      threadRuntimeForTest: threadRuntime,
+      persistThreadForTest: persistThread,
       normalizeRateLimitSnapshot,
       mergeRateLimitSnapshot,
       codexQuotaWindows,
       remainingPercent,
+      quotaRetryDelay,
       effectiveRisk,
       reconcileSnapshotToHistory,
       formatCapturedAt,
